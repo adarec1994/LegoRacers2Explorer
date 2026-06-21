@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -85,6 +89,20 @@ endif()
 
 set(FONT_AWESOME_SOLID_TTF "${fontawesome_SOURCE_DIR}/webfonts/fa-solid-900.ttf")
 set(PROJECT_SOURCE_DIR_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
+set(BLENDER_ADDON_ZIP "${CMAKE_CURRENT_SOURCE_DIR}/tools/blender/import_lr2.zip")
+set(BLENDER_ADDON_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated_blender_addon.h")
+
+add_custom_command(
+        OUTPUT ${BLENDER_ADDON_HEADER}
+        COMMAND ${CMAKE_COMMAND}
+        -DINPUT_FILE=${BLENDER_ADDON_ZIP}
+        -DOUTPUT_FILE=${BLENDER_ADDON_HEADER}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/embed_binary.cmake
+        DEPENDS ${BLENDER_ADDON_ZIP} ${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/embed_binary.cmake
+        VERBATIM)
+
+set_source_files_properties(${BLENDER_ADDON_HEADER} PROPERTIES GENERATED TRUE)
+
 configure_file(src/generated_paths.h.in
         ${CMAKE_CURRENT_BINARY_DIR}/generated_paths.h
         @ONLY)
@@ -95,7 +113,8 @@ add_library(gtc_core STATIC
 target_include_directories(gtc_core PUBLIC src)
 
 add_executable(LegoRacers2 WIN32
-        src/main.cpp)
+        src/main.cpp
+        ${BLENDER_ADDON_HEADER})
 target_include_directories(LegoRacers2 PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_compile_definitions(LegoRacers2 PRIVATE UNICODE _UNICODE)
 target_link_libraries(LegoRacers2 PRIVATE

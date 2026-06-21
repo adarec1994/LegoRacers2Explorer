@@ -7,6 +7,7 @@
 #include <GL/gl.h>
 
 #include "generated_paths.h"
+#include "generated_blender_addon.h"
 #include "ImGuiFileDialog.h"
 #include "gtc_archive.h"
 #include "imgui.h"
@@ -56,6 +57,7 @@ constexpr wchar_t kWindowClassName[] = L"LegoRacers2GtcBrowserWindow";
 constexpr char kChooseGtcDialogKey[] = "ChooseGtcDialog";
 constexpr char kChooseDumpDirectoryDialogKey[] = "ChooseDumpDirectoryDialog";
 constexpr char kExportFileDialogKey[] = "ExportFileDialog";
+constexpr char kBlenderAddonDialogKey[] = "BlenderAddonDialog";
 
 constexpr const char* ICON_FA_BOX_ARCHIVE = "\xef\x86\x87";
 constexpr const char* ICON_FA_BOLT = "\xef\x83\xa7";
@@ -204,6 +206,7 @@ std::filesystem::path ExecutableDirectory() {
 #include "wrl/heightmap_export.cpp"
 #include "wrl/level_export.cpp"
 #include "export/export_dialogs.cpp"
+#include "plugins/blender_addon.cpp"
 
 #include "ui/browser.cpp"
 

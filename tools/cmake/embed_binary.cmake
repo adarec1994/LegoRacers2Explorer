@@ -1,0 +1,5 @@
+file(READ "${INPUT_FILE}" binary_data HEX)
+string(LENGTH "${binary_data}" binary_hex_length)
+math(EXPR binary_byte_count "${binary_hex_length} / 2")
+string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1, " binary_values "${binary_data}")
+file(WRITE "${OUTPUT_FILE}" "#pragma once\n#include <cstddef>\n#include <cstdint>\ninline constexpr std::uint8_t kBlenderAddonZipData[] = {${binary_values}};\ninline constexpr std::size_t kBlenderAddonZipSize = ${binary_byte_count};\n")

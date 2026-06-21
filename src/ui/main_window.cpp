@@ -79,6 +79,19 @@ void DrawFileDialogs(AppState& state) {
         state.pendingExportPreviewTexture = false;
         ImGuiFileDialog::Instance()->Close();
     }
+
+    if (ImGuiFileDialog::Instance()->Display(
+            kBlenderAddonDialogKey,
+            ImGuiWindowFlags_NoCollapse,
+            ImVec2(720.0f, 420.0f),
+            ImVec2(FLT_MAX, FLT_MAX))) {
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            ExportBlenderAddon(
+                state,
+                ImGuiFileDialog::Instance()->GetFilePathName(IGFD_ResultMode_KeepInputFile));
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
 }
 
 void DrawEmptyState(AppState& state) {
@@ -113,6 +126,13 @@ void DrawToolbar(AppState& state) {
         ImGui::SliderFloat("Font Size", &state.fontSize, 12.0f, 28.0f, "%.0f px");
         state.fontSize = std::clamp(state.fontSize, 12.0f, 28.0f);
         io.FontGlobalScale = state.fontSize / 16.0f;
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Plugins")) {
+        if (ImGui::MenuItem("Blender Addon")) {
+            OpenBlenderAddonDialog();
+        }
         ImGui::EndMenu();
     }
 
