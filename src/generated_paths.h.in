@@ -1,0 +1,3 @@
+#pragma once
+
+#define FONT_AWESOME_SOLID_TTF R"(@FONT_AWESOME_SOLID_TTF@)"
