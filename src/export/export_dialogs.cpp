@@ -10,6 +10,8 @@ const char* ExportDialogTitle(ExportKind kind) {
         return "Export GLB";
     case ExportKind::ModelFbx:
         return "Export FBX";
+    case ExportKind::LevelLr2:
+        return "Export Level";
     case ExportKind::HeightmapPng:
         return "Export Heightmap PNG";
     case ExportKind::HeightmapTiff:
@@ -36,6 +38,8 @@ const char* ExportDialogFilter(ExportKind kind) {
         return ".glb";
     case ExportKind::ModelFbx:
         return ".fbx";
+    case ExportKind::LevelLr2:
+        return ".lr2";
     default:
         return ".*";
     }
@@ -209,6 +213,9 @@ void ExecuteExportDialogResult(AppState& state, const std::filesystem::path& exp
     case ExportKind::ModelGlb:
     case ExportKind::ModelFbx:
         ExportModelNode(state, node, exportPath, state.pendingExportKind);
+        break;
+    case ExportKind::LevelLr2:
+        ExportLevelNode(state, node, exportPath);
         break;
     case ExportKind::HeightmapPng:
     case ExportKind::HeightmapTiff:
