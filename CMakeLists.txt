@@ -5,6 +5,7 @@ include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
         imgui
@@ -54,6 +55,8 @@ FetchContent_Declare(
         GIT_REPOSITORY https://github.com/mackron/miniaudio.git
         GIT_TAG master
         GIT_SHALLOW TRUE)
+set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(miniaudio)
 
 if(NOT TARGET miniaudio)
@@ -61,12 +64,31 @@ if(NOT TARGET miniaudio)
     target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
 endif()
 
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+        assimp
+        GIT_REPOSITORY https://github.com/assimp/assimp.git
+        GIT_TAG v6.0.2
+        GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(assimp)
+
+if(TARGET assimp::assimp)
+    set(ASSIMP_TARGET assimp::assimp)
+else()
+    set(ASSIMP_TARGET assimp)
+endif()
+
 set(FONT_AWESOME_SOLID_TTF "${fontawesome_SOURCE_DIR}/webfonts/fa-solid-900.ttf")
 configure_file(src/generated_paths.h.in
         ${CMAKE_CURRENT_BINARY_DIR}/generated_paths.h
         @ONLY)
 
-add_library(gtc_core
+add_library(gtc_core STATIC
         src/gtc_archive.cpp
         src/gtc_archive.h)
 target_include_directories(gtc_core PUBLIC src)
@@ -80,6 +102,7 @@ target_link_libraries(LegoRacers2 PRIVATE
         imgui
         ImGuiFileDialog
         miniaudio
+        ${ASSIMP_TARGET}
         opengl32
         ole32
         windowscodecs)

@@ -58,4 +58,4 @@ void DumpArchive(const ArchiveInfo& archive,
 
 std::string FormatByteSize(std::uint64_t bytes);
 
-} // namespace gtc
+}

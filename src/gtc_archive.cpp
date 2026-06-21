@@ -357,7 +357,7 @@ void WriteEntry(const std::vector<char>& decompressed,
     }
 }
 
-} // namespace
+}
 
 ArchiveError::ArchiveError(const std::string& message)
     : std::runtime_error(message) {
@@ -487,4 +487,4 @@ std::string FormatByteSize(std::uint64_t bytes) {
     return out.str();
 }
 
-} // namespace gtc
+}

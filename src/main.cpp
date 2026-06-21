@@ -14,6 +14,13 @@
 
 #include "miniaudio.h"
 
+#include <assimp/Exporter.hpp>
+#include <assimp/material.h>
+#include <assimp/matrix4x4.h>
+#include <assimp/mesh.h>
+#include <assimp/quaternion.h>
+#include <assimp/scene.h>
+
 #include <algorithm>
 #include <atomic>
 #include <array>
@@ -30,10 +37,12 @@
 #include <future>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -66,7 +75,6 @@ HDC gDeviceContext = nullptr;
 HGLRC gOpenGlContext = nullptr;
 int gClientWidth = 1;
 int gClientHeight = 1;
-std::ofstream gDebugLog;
 
 #ifdef GL_CURRENT_PROGRAM
 constexpr GLenum kGlCurrentProgram = GL_CURRENT_PROGRAM;
@@ -143,8 +151,6 @@ GLint gTerrainTextureUniforms[4] = {-1, -1, -1, -1};
 GLint gTerrainLightDirUniform = -1;
 GLint gTerrainAmbientUniform = -1;
 bool gTerrainShaderAttempted = false;
-std::string gLastLoggedModelRenderPath;
-std::string gLastLoggedLevelRenderPath;
 
 std::filesystem::path ExecutableDirectory() {
     std::wstring buffer(MAX_PATH, L'\0');
@@ -160,33 +166,6 @@ std::filesystem::path ExecutableDirectory() {
 
     buffer.resize(length);
     return std::filesystem::path(buffer).parent_path();
-}
-
-void LogDebug(const std::string& message) {
-    if (!gDebugLog) {
-        return;
-    }
-
-    SYSTEMTIME time;
-    GetLocalTime(&time);
-    gDebugLog
-        << std::setfill('0')
-        << std::setw(2) << time.wHour << ':'
-        << std::setw(2) << time.wMinute << ':'
-        << std::setw(2) << time.wSecond << '.'
-        << std::setw(3) << time.wMilliseconds
-        << "  " << message << '\n';
-    gDebugLog.flush();
-}
-
-void InitializeDebugLog() {
-    try {
-        const auto logPath = ExecutableDirectory() / "debug.log";
-        gDebugLog.open(logPath, std::ios::trunc);
-        LogDebug("LegoRacers2 started");
-        LogDebug("debug log: " + logPath.string());
-    } catch (...) {
-    }
 }
 
 struct ArchiveNode {
@@ -229,6 +208,7 @@ struct DecodedTexture {
 struct TexturePreview {
     bool open = false;
     bool animated = false;
+    bool generatedHeightmap = false;
     bool red = true;
     bool green = true;
     bool blue = true;
@@ -600,6 +580,18 @@ enum class AssetFilter {
     Audio,
 };
 
+enum class ExportKind {
+    None,
+    TexturePng,
+    TextureTiff,
+    TextureDds,
+    ModelGlb,
+    ModelFbx,
+    HeightmapPng,
+    HeightmapTiff,
+    HeightmapDds,
+};
+
 struct AppState {
     gtc::ArchiveInfo archive;
     ArchiveBrowser browser;
@@ -619,6 +611,10 @@ struct AppState {
     std::future<void> dumpFuture;
     std::array<char, 256> searchText = {};
     AssetFilter assetFilter = AssetFilter::All;
+    ExportKind pendingExportKind = ExportKind::None;
+    int pendingExportNode = -1;
+    int pendingExportTerrainSection = -1;
+    bool pendingExportPreviewTexture = false;
     float bottomPanelHeight = 260.0f;
     TexturePreview texturePreview;
     TextPreview textPreview;
@@ -684,7 +680,6 @@ void SetupOpenGl(HWND hwnd) {
     gClientHeight = std::max(1L, rect.bottom - rect.top);
 
     const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-    LogDebug(std::string("OpenGL version: ") + (version != nullptr ? version : "unknown"));
 
     gGlUseProgram = reinterpret_cast<GlUseProgramFn>(wglGetProcAddress("glUseProgram"));
     gGlCreateShader = reinterpret_cast<GlCreateShaderFn>(wglGetProcAddress("glCreateShader"));
@@ -723,7 +718,6 @@ void SetupOpenGl(HWND hwnd) {
         gGlUniform3f != nullptr &&
         gGlUniform1f != nullptr &&
         gGlActiveTexture != nullptr;
-    LogDebug(std::string("OpenGL shader API: ") + (shaderApiLoaded ? "loaded" : "unavailable"));
 }
 
 void CleanupOpenGl(HWND hwnd) {
@@ -1070,7 +1064,6 @@ std::filesystem::path MusicDirectoryForArchive(const gtc::ArchiveInfo& archive) 
 void AddExternalMusicFiles(AppState& state, ArchiveBrowser& browser) {
     const std::filesystem::path musicDirectory = MusicDirectoryForArchive(state.archive);
     if (!std::filesystem::exists(musicDirectory) || !std::filesystem::is_directory(musicDirectory)) {
-        LogDebug("music folder not found: " + musicDirectory.string());
         return;
     }
 
@@ -1089,7 +1082,6 @@ void AddExternalMusicFiles(AppState& state, ArchiveBrowser& browser) {
     });
 
     if (musicFiles.empty()) {
-        LogDebug("music folder has no supported tracks: " + musicDirectory.string());
         return;
     }
 
@@ -1109,9 +1101,6 @@ void AddExternalMusicFiles(AppState& state, ArchiveBrowser& browser) {
         browser.nodes[musicFolder].files.push_back(fileIndex);
     }
 
-    LogDebug(
-        "music folder loaded: " + musicDirectory.string() +
-        " tracks=" + std::to_string(musicFiles.size()));
 }
 
 void BuildBrowser(AppState& state) {
@@ -1179,7 +1168,6 @@ void RebuildVisibleEntries(AppState&) {
 
 void LoadArchive(AppState& state, const std::filesystem::path& path) {
     try {
-        LogDebug("load archive: " + path.string());
         state.archive = gtc::LoadArchive(path);
         state.archiveLoaded = true;
         state.archiveDataLoaded = false;
@@ -1196,9 +1184,7 @@ void LoadArchive(AppState& state, const std::filesystem::path& path) {
         state.status = "Loaded " + state.selectedPath;
         BuildBrowser(state);
         SaveSavedGtcPath(state.archive.gtcPath);
-        LogDebug("archive loaded: " + state.selectedPath + " entries=" + std::to_string(state.archive.entries.size()));
     } catch (const std::exception& error) {
-        LogDebug(std::string("archive load failed: ") + error.what());
         state.archiveLoaded = false;
         state.archiveDataLoaded = false;
         state.archiveData.clear();
@@ -1979,7 +1965,6 @@ LoadedIflFrames LoadIflFrames(AppState& state, const ArchiveNode& node, const st
             result.frameNames.push_back(frameEntry.path);
             result.frameTicks.push_back(frameTicks);
         } catch (const std::exception& error) {
-            LogDebug(std::string("IFL frame load failed: ") + frameEntry.path + " - " + error.what());
             ++result.missingFrames;
         }
     }
@@ -2177,7 +2162,6 @@ void LoadModelPreviewAnimations(AppState& state, ModelPreview& preview, const st
         } catch (const std::exception& error) {
             clip.path = animationEntry.path;
             clip.status = std::string("Load failed: ") + error.what();
-            LogDebug("BSA animation load failed: " + animationEntry.path + " - " + error.what());
             preview.animations.push_back(std::move(clip));
         }
     }
@@ -2186,7 +2170,6 @@ void LoadModelPreviewAnimations(AppState& state, ModelPreview& preview, const st
 void LoadModelPreviewSkeleton(AppState& state, ModelPreview& preview, const ArchiveNode& modelNode) {
     const std::size_t skeletonEntryIndex = ResolveModelSkeletonEntryIndex(state, modelNode);
     if (skeletonEntryIndex == static_cast<std::size_t>(-1)) {
-        LogDebug("model skeleton not found: " + modelNode.path);
         return;
     }
 
@@ -2221,17 +2204,9 @@ void LoadModelPreviewSkeleton(AppState& state, ModelPreview& preview, const Arch
                 preview.status += "  animations " + std::to_string(loadedAnimations) + "/" +
                                   std::to_string(preview.animations.size());
             }
-            LogDebug(
-                "model skeleton loaded: " + skeletonEntry.path +
-                " bones=" + std::to_string(preview.skeleton.size()) +
-                " clips=" + std::to_string(preview.skeletonClips.size()) +
-                " animations=" + std::to_string(preview.animations.size()) +
-                " skn0_skin=" + std::to_string(skinAligned ? 1 : 0) +
-                " generated_skin_weights=" + std::to_string(skinAligned ? 0 : 1));
         }
     } catch (const std::exception& error) {
         preview.status += "  skeleton failed";
-        LogDebug(std::string("model skeleton load failed: ") + modelNode.path + " - " + error.what());
     }
 }
 
@@ -2263,7 +2238,6 @@ void LoadModelPreviewTextures(AppState& state, ModelPreview& preview) {
                 ++loaded;
             }
         } catch (const std::exception& error) {
-            LogDebug(std::string("model texture load failed: ") + material.path + " - " + error.what());
             ++missing;
         }
     }
@@ -2271,11 +2245,6 @@ void LoadModelPreviewTextures(AppState& state, ModelPreview& preview) {
     if (!preview.materials.empty()) {
         preview.status += "  textures " + std::to_string(loaded) + "/" +
                           std::to_string(preview.materials.size()) + " loaded";
-        LogDebug(
-            "model textures loaded: " + preview.path +
-            " loaded=" + std::to_string(loaded) +
-            " missing=" + std::to_string(missing) +
-            " total=" + std::to_string(preview.materials.size()));
     }
 }
 
@@ -2400,12 +2369,6 @@ ModelAnimationClip DecodeBsaAnimation(const std::vector<char>& bytes, std::strin
     clip.status =
         std::to_string(clip.frameCount) + " frames @ " +
         std::to_string(static_cast<int>(std::round(clip.fps))) + " fps";
-    LogDebug(
-        "BSA animation parsed: " + clip.path +
-        " frames=" + std::to_string(clip.frameCount) +
-        " bones=" + std::to_string(clip.boneCount) +
-        " fps=" + std::to_string(clip.fps) +
-        " root_motion=" + std::to_string(clip.rootMotion ? 1 : 0));
     return clip;
 }
 
@@ -2622,6 +2585,15 @@ bool HasModelSkinning(const ModelPreview& preview) {
     return !preview.skinRecords.empty() && !preview.skinLookupGroups.empty();
 }
 
+bool HasExportableSkinning(const ModelPreview& preview) {
+    if (preview.skeleton.empty()) {
+        return false;
+    }
+    return std::any_of(preview.vertices.begin(), preview.vertices.end(), [](const ModelVertex& vertex) {
+        return vertex.skinInfluenceCount > 0;
+    });
+}
+
 Vec3 TransformSkinInfluence(const SkeletonBone& bone, const SkinBlendInfluence& influence, bool bindPose) {
     const Vec3 bonePosition = bindPose ? bone.bindWorldPosition : bone.worldPosition;
     const Quat boneRotation = bindPose ? bone.bindWorldRotation : bone.worldRotation;
@@ -2699,11 +2671,6 @@ bool ApplySkinDerivedSkeletonAlignment(ModelPreview& preview) {
     }
     preview.skeletonWorldOffset = offset;
     preview.hasSkeletonWorldOffset = true;
-    LogDebug(
-        "skin-derived skeleton alignment: samples=" + std::to_string(sampleCount) +
-        " offset=(" + std::to_string(offset.x) + "," +
-        std::to_string(offset.y) + "," +
-        std::to_string(offset.z) + ")");
     return true;
 }
 
@@ -3505,9 +3472,6 @@ ModelPreview DecodeMd2Model(const std::vector<char>& bytes) {
     if (skinOffset != static_cast<std::size_t>(-1)) {
         try {
             DecodeMd2SkinChunk(bytes, skinOffset, model);
-            LogDebug(
-                "MD2 SKN0 parsed: records=" + std::to_string(model.skinRecords.size()) +
-                " groups=" + std::to_string(model.skinLookupGroups.size()));
         } catch (const std::exception& error) {
             model.skinRecords.clear();
             model.skinLookupGroups.clear();
@@ -3516,7 +3480,6 @@ ModelPreview DecodeMd2Model(const std::vector<char>& bytes) {
                 vertex.skinInfluenceCount = 0;
                 vertex.skinInfluences = {};
             }
-            LogDebug(std::string("MD2 SKN0 parse failed: ") + error.what());
         }
     }
 
@@ -3799,16 +3762,6 @@ LevelPreview DecodeTdfTerrain(const std::vector<char>& bytes, std::string name, 
     if (skippedTriangles > 0) {
         preview.status += ", " + std::to_string(skippedTriangles) + " cutout triangles skipped";
     }
-    LogDebug(
-        "TDF terrain decoded: " + preview.path +
-        " width=" + std::to_string(terrainWidth) +
-        " depth=" + std::to_string(terrainDepth) +
-        " filter_scale=" + std::to_string(filterScale) +
-        " grid_info=" + FormatHex32(static_cast<std::uint32_t>(gridInfoOffset)) +
-        " grid_offsets=" + FormatHex32(static_cast<std::uint32_t>(gridOffsetTableOffset)) +
-        " vertices=" + std::to_string(preview.vertices.size()) +
-        " triangles=" + std::to_string(preview.triangles.size()) +
-        " skipped=" + std::to_string(skippedTriangles));
     return preview;
 }
 
@@ -4114,6 +4067,33 @@ bool TryReadWorldObjectPosition(const std::vector<char>& bytes,
     return false;
 }
 
+bool CanUseFallbackModelPosition(const std::string& classLower) {
+    return classLower != "cskybox" &&
+           classLower != "clegoterrain" &&
+           classLower != "cwatersheet" &&
+           classLower != "cwatercourse";
+}
+
+bool TryReadFallbackModelPosition(const std::vector<char>& bytes,
+                                  std::size_t recordOffset,
+                                  std::size_t recordEnd,
+                                  const std::string& classLower,
+                                  Vec3& position) {
+    if (!CanUseFallbackModelPosition(classLower)) {
+        return false;
+    }
+
+    constexpr std::array<std::size_t, 12> kCandidates = {
+        0x58, 0x5C, 0x68, 0x70, 0x78, 0x88, 0x90, 0x98, 0xA8, 0xB8, 0xC8, 0xD8,
+    };
+    for (std::size_t relativeOffset : kCandidates) {
+        if (TryReadWorldVec3(bytes, recordOffset, recordEnd, relativeOffset, position)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool IsWrlRecordAt(const std::vector<char>& bytes, std::size_t offset) {
     return offset + 4 <= bytes.size() &&
            bytes[offset + 0] == 'O' &&
@@ -4245,10 +4225,6 @@ LevelPreview DecodeWrlWorld(const std::vector<char>& bytes, std::string name, st
     preview.path = std::move(path);
 
     const std::vector<WrlObjectRecord> records = FindWrlObjectRecords(bytes);
-    LogDebug(
-        "WRL decode: " + preview.path +
-        " bytes=" + std::to_string(bytes.size()) +
-        " records=" + std::to_string(records.size()));
     preview.objects.reserve(records.size());
     int untrustedLengths = 0;
     for (const WrlObjectRecord& record : records) {
@@ -4305,6 +4281,12 @@ LevelPreview DecodeWrlWorld(const std::vector<char>& bytes, std::string name, st
             object.modelPath = FirstWorldMd2Path(object.assetPaths);
             if (!object.modelPath.empty()) {
                 object.assetPath = object.modelPath;
+            }
+        }
+        if (!object.hasPosition && !object.modelPath.empty()) {
+            object.hasPosition =
+                TryReadFallbackModelPosition(bytes, record.offset, record.end, classLower, object.position);
+            if (object.hasPosition) {
             }
         }
         if (classLower == "clegoterrain") {
@@ -4395,12 +4377,6 @@ LevelPreview DecodeWrlWorld(const std::vector<char>& bytes, std::string name, st
     if (untrustedLengths > 0) {
         preview.status += ", " + std::to_string(untrustedLengths) + " guessed records";
     }
-    LogDebug(
-        "WRL decode complete: " + preview.path +
-        " objects=" + std::to_string(preview.objects.size()) +
-        " terrain=" + preview.terrainPath +
-        " water_sheets=" + std::to_string(preview.waterSheets.size()) +
-        " untrusted_lengths=" + std::to_string(untrustedLengths));
     return preview;
 }
 
@@ -4515,7 +4491,6 @@ std::vector<unsigned char> CollectTerrainTextureIndices(const LevelTerrainSectio
 void LoadTerrainPreviewTexture(AppState& state, LevelPreview& preview, const std::string& terrainPath) {
     const std::size_t textureEntryIndex = ResolveTerrainTextureEntryIndex(state, terrainPath);
     if (textureEntryIndex == static_cast<std::size_t>(-1)) {
-        LogDebug("terrain baked texture not found for: " + terrainPath);
         return;
     }
 
@@ -4535,13 +4510,8 @@ void LoadTerrainPreviewTexture(AppState& state, LevelPreview& preview, const std
             ", texture " +
             std::to_string(preview.terrainTexture.width) + "x" +
             std::to_string(preview.terrainTexture.height);
-        LogDebug(
-            "terrain texture loaded: " + textureEntry.path +
-            " " + std::to_string(preview.terrainTexture.width) +
-            "x" + std::to_string(preview.terrainTexture.height));
     } catch (const std::exception& error) {
         preview.status += ", texture failed";
-        LogDebug(std::string("terrain texture load failed: ") + terrainPath + " - " + error.what());
     }
 }
 
@@ -4550,9 +4520,6 @@ void LoadTerrainSectionTexture(AppState& state, LevelTerrainSection& section) {
     for (const unsigned char textureIndex : CollectTerrainTextureIndices(section)) {
         const std::size_t layerEntryIndex = ResolveTerrainLayerTextureEntryIndex(state, section.path, textureIndex);
         if (layerEntryIndex == static_cast<std::size_t>(-1)) {
-            LogDebug(
-                "terrain layer texture not found: " + section.path +
-                " texture" + std::to_string(static_cast<int>(textureIndex) + 1));
             continue;
         }
 
@@ -4572,24 +4539,15 @@ void LoadTerrainSectionTexture(AppState& state, LevelTerrainSection& section) {
                 ++whirledTextureCount;
             }
         } catch (const std::exception& error) {
-            LogDebug(
-                std::string("terrain layer texture load failed: ") +
-                section.path +
-                " texture" + std::to_string(static_cast<int>(textureIndex) + 1) +
-                " - " + error.what());
         }
     }
 
     if (whirledTextureCount > 0) {
-        LogDebug(
-            "terrain Whirled layer textures loaded: " + section.path +
-            " count=" + std::to_string(whirledTextureCount));
         return;
     }
 
     const std::size_t textureEntryIndex = ResolveTerrainTextureEntryIndex(state, section.path);
     if (textureEntryIndex == static_cast<std::size_t>(-1)) {
-        LogDebug("terrain section texture not found for: " + section.path);
         return;
     }
 
@@ -4605,12 +4563,7 @@ void LoadTerrainSectionTexture(AppState& state, LevelTerrainSection& section) {
             true,
             true);
         section.texturePath = textureEntry.path;
-        LogDebug(
-            "terrain section texture loaded: " + textureEntry.path +
-            " " + std::to_string(section.texture.width) +
-            "x" + std::to_string(section.texture.height));
     } catch (const std::exception& error) {
-        LogDebug(std::string("terrain section texture load failed: ") + section.path + " - " + error.what());
     }
 }
 
@@ -4934,7 +4887,6 @@ float MaxSupportedAnisotropy() {
                 maxAnisotropy = 1.0f;
             }
         }
-        LogDebug("OpenGL max anisotropy: " + std::to_string(maxAnisotropy));
     }
     return maxAnisotropy;
 }
@@ -5075,7 +5027,6 @@ GLuint CompileTerrainShader(GLenum shaderType, const char* source, const char* l
     GLint compiled = 0;
     gGlGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (compiled == 0) {
-        LogDebug(std::string("terrain shader compile failed (") + label + "): " + GetShaderInfoLog(shader));
         gGlDeleteShader(shader);
         return 0;
     }
@@ -5150,7 +5101,6 @@ void main() {
     gGlDeleteShader(vertexShader);
     gGlDeleteShader(fragmentShader);
     if (linked == 0) {
-        LogDebug("terrain shader link failed: " + GetProgramInfoLog(program));
         gGlDeleteProgram(program);
         return 0;
     }
@@ -5162,7 +5112,6 @@ void main() {
     gTerrainTextureUniforms[3] = gGlGetUniformLocation(program, "tex3");
     gTerrainLightDirUniform = gGlGetUniformLocation(program, "lightDir");
     gTerrainAmbientUniform = gGlGetUniformLocation(program, "ambientLight");
-    LogDebug("terrain shader compiled");
     return gTerrainShaderProgram;
 }
 
@@ -5182,9 +5131,6 @@ void UploadPreviewTexture(TexturePreview& preview) {
         return;
     }
 
-    LogDebug(
-        "upload preview texture " + preview.name + " " +
-        std::to_string(preview.decoded.width) + "x" + std::to_string(preview.decoded.height));
     DestroyPreviewTexture(preview);
 
     const std::vector<unsigned char> pixels = BuildChannelMaskedPixels(preview);
@@ -5340,7 +5286,6 @@ bool OpenFxPreviewForIfl(AppState& state, const ArchiveNode& node) {
         return false;
     }
 
-    LogDebug("open FX IFL preview: " + node.path);
     ClosePreviewsForFx(state);
 
     FxPreview preview;
@@ -5366,13 +5311,11 @@ bool OpenFxPreviewForIfl(AppState& state, const ArchiveNode& node) {
         state.fxPreview = std::move(preview);
         SetFxPreviewFrame(state.fxPreview, 0);
         state.status = "Previewing FX " + node.path;
-        LogDebug("open FX IFL preview complete: " + node.path);
         return true;
     } catch (const std::exception& error) {
         preview.status = std::string("FX preview failed: ") + error.what();
         state.fxPreview = std::move(preview);
         state.status = state.fxPreview.status;
-        LogDebug(state.fxPreview.status);
         return true;
     }
 }
@@ -5407,7 +5350,6 @@ bool OpenFxPreviewForFolder(AppState& state, int nodeIndex) {
         return false;
     }
 
-    LogDebug("open FX folder preview: " + folder.path);
     ClosePreviewsForFx(state);
 
     FxPreview preview;
@@ -5426,7 +5368,6 @@ bool OpenFxPreviewForFolder(AppState& state, int nodeIndex) {
             preview.frameNames.push_back(frameNode.path);
             preview.frameTicks.push_back(1);
         } catch (const std::exception& error) {
-            LogDebug(std::string("FX frame load failed: ") + frameNode.path + " - " + error.what());
             ++failedFrames;
         }
     }
@@ -5447,9 +5388,6 @@ bool OpenFxPreviewForFolder(AppState& state, int nodeIndex) {
     state.fxPreview = std::move(preview);
     SetFxPreviewFrame(state.fxPreview, 0);
     state.status = "Previewing FX " + folder.path;
-    LogDebug(
-        "open FX folder preview complete: " + folder.path +
-        " frames=" + std::to_string(state.fxPreview.frames.size()));
     return true;
 }
 
@@ -5496,7 +5434,6 @@ void OpenTextPreview(AppState& state, const ArchiveNode& node) {
         return;
     }
 
-    LogDebug("open text preview: " + node.path);
     StopAudioPreview(state.audioPreview);
     StopFxPreview(state.fxPreview);
     StopLevelPreview(state.levelPreview);
@@ -5517,12 +5454,10 @@ void OpenTextPreview(AppState& state, const ArchiveNode& node) {
             std::to_string(std::count(preview.content.begin(), preview.content.end(), '\n') + 1) + " lines";
         state.textPreview = std::move(preview);
         state.status = "Previewing " + node.path;
-        LogDebug("open text preview complete: " + node.path + " bytes=" + std::to_string(bytes.size()));
     } catch (const std::exception& error) {
         preview.status = std::string("Text preview failed: ") + error.what();
         state.textPreview = std::move(preview);
         state.status = state.textPreview.status;
-        LogDebug(state.textPreview.status);
     }
 }
 
@@ -5534,7 +5469,6 @@ void OpenTexturePreview(AppState& state, const ArchiveNode& node) {
         return;
     }
 
-    LogDebug("open texture preview: " + node.path);
     StopAudioPreview(state.audioPreview);
     StopFxPreview(state.fxPreview);
     StopLevelPreview(state.levelPreview);
@@ -5550,6 +5484,7 @@ void OpenTexturePreview(AppState& state, const ArchiveNode& node) {
     preview.blue = true;
     preview.alpha = true;
     preview.animated = false;
+    preview.generatedHeightmap = false;
     preview.frameIndex = 0;
     preview.lastFrameTime = 0.0;
     preview.frames.clear();
@@ -5566,9 +5501,7 @@ void OpenTexturePreview(AppState& state, const ArchiveNode& node) {
         preview.open = true;
         UploadPreviewTexture(preview);
         state.status = "Previewing " + node.path;
-        LogDebug("open texture preview complete: " + node.path);
     } catch (const std::exception& error) {
-        LogDebug(std::string("open texture preview failed: ") + error.what());
         preview.open = true;
         preview.animated = false;
         preview.frameIndex = 0;
@@ -5587,7 +5520,6 @@ void OpenModelPreview(AppState& state, const ArchiveNode& node) {
         return;
     }
 
-    LogDebug("open model preview: " + node.path);
     StopAudioPreview(state.audioPreview);
     StopFxPreview(state.fxPreview);
     StopLevelPreview(state.levelPreview);
@@ -5618,13 +5550,7 @@ void OpenModelPreview(AppState& state, const ArchiveNode& node) {
         DestroyModelRenderTexture(state.modelPreview);
         state.modelPreview = std::move(decoded);
         state.status = "Previewing " + node.path;
-        LogDebug(
-            "open model preview complete: " + node.path + " vertices=" +
-            std::to_string(state.modelPreview.vertices.size()) + " triangles=" +
-            std::to_string(state.modelPreview.triangles.size()) + " sections=" +
-            std::to_string(state.modelPreview.sections.size()));
     } catch (const std::exception& error) {
-        LogDebug(std::string("open model preview failed: ") + error.what());
         preview.status = std::string("Model preview failed: ") + error.what();
         DestroyModelRenderTexture(state.modelPreview);
         state.modelPreview = std::move(preview);
@@ -5639,7 +5565,6 @@ void OpenAudioPreview(AppState& state, const ArchiveNode& node) {
         return;
     }
 
-    LogDebug("open audio preview: " + node.path);
     DestroyPreviewTexture(state.texturePreview);
     state.texturePreview.open = false;
     state.textPreview = {};
@@ -5668,18 +5593,10 @@ void OpenAudioPreview(AppState& state, const ArchiveNode& node) {
             preview.decoded.format;
         StartAudioPlayback(preview);
         state.status = "Playing " + node.path;
-        LogDebug(
-            "open audio preview complete: " + node.path +
-            (node.externalFile ? " external=" + node.externalPath.string() : "") +
-            " channels=" + std::to_string(preview.decoded.channels) +
-            " sample_rate=" + std::to_string(preview.decoded.sampleRate) +
-            " bits=" + std::to_string(preview.decoded.bitsPerSample) +
-            " frames=" + std::to_string(preview.decoded.frameCount));
     } catch (const std::exception& error) {
         StopAudioPlayback(preview);
         preview.status = std::string("Audio preview failed: ") + error.what();
         state.status = preview.status;
-        LogDebug(preview.status);
     }
 }
 
@@ -5713,18 +5630,9 @@ void TryLoadWorldTerrain(AppState& state, LevelPreview& preview) {
     int missingSections = 0;
     for (const WrlTerrainLink& link : terrainLinks) {
         const std::string terrainCandidate = TerrainDataCandidateFromWorldPath(link.path);
-        LogDebug(
-            "WRL terrain candidate: " + terrainCandidate +
-            " layer=" + (link.hasLayer ? FormatHex32(link.layer) : std::string("none")) +
-            " pos=" + std::to_string(link.position.x) + "," + std::to_string(link.position.y) + "," +
-            std::to_string(link.position.z) +
-            " scale=" + std::to_string(link.scale.x) + "," + std::to_string(link.scale.y) + "," +
-            std::to_string(link.scale.z) +
-            " tex_scale=" + std::to_string(link.textureScaleX) + "," + std::to_string(link.textureScaleY));
         const std::size_t terrainEntryIndex = FindArchiveEntryIndex(state, terrainCandidate);
         if (terrainEntryIndex == static_cast<std::size_t>(-1)) {
             ++missingSections;
-            LogDebug("WRL terrain not found: " + terrainCandidate);
             continue;
         }
 
@@ -5738,10 +5646,8 @@ void TryLoadWorldTerrain(AppState& state, LevelPreview& preview) {
             AddTerrainSectionToWorld(preview, std::move(terrain), link);
             LoadTerrainSectionTexture(state, preview.terrainSections.back());
             ++loadedSections;
-            LogDebug("WRL terrain loaded: " + terrainEntry.path);
         } catch (const std::exception& error) {
             ++missingSections;
-            LogDebug(std::string("WRL terrain load failed: ") + terrainCandidate + " - " + error.what());
         }
     }
 
@@ -5774,7 +5680,6 @@ void TryLoadWorldModels(AppState& state, LevelPreview& preview) {
         if (entryIndex == static_cast<std::size_t>(-1)) {
             ++missingModels;
             assetLookup.emplace(lookupKey, -1);
-            LogDebug("WRL model not found: " + modelPath);
             return -1;
         }
 
@@ -5799,7 +5704,6 @@ void TryLoadWorldModels(AppState& state, LevelPreview& preview) {
         } catch (const std::exception& error) {
             ++failedModels;
             assetLookup.emplace(lookupKey, -1);
-            LogDebug(std::string("WRL model load failed: ") + modelPath + " - " + error.what());
             return -1;
         }
     };
@@ -5850,13 +5754,6 @@ void TryLoadWorldModels(AppState& state, LevelPreview& preview) {
     if (failedModels > 0) {
         preview.status += ", " + std::to_string(failedModels) + " models failed";
     }
-    LogDebug(
-        "WRL models loaded: " + preview.path +
-        " instances=" + std::to_string(preview.modelInstances.size()) +
-        " skyboxes=" + std::to_string(preview.skyboxAssetIndices.size()) +
-        " unique=" + std::to_string(preview.modelAssets.size()) +
-        " missing=" + std::to_string(missingModels) +
-        " failed=" + std::to_string(failedModels));
 }
 
 void TryLoadWorldWater(AppState& state, LevelPreview& preview) {
@@ -5873,7 +5770,6 @@ void TryLoadWorldWater(AppState& state, LevelPreview& preview) {
         const std::size_t textureEntryIndex = ResolveModelTextureEntryIndex(state, waterSheet.texturePath);
         if (textureEntryIndex == static_cast<std::size_t>(-1)) {
             ++missingWater;
-            LogDebug("WRL water texture not found: " + waterSheet.texturePath);
             continue;
         }
 
@@ -5892,7 +5788,6 @@ void TryLoadWorldWater(AppState& state, LevelPreview& preview) {
             ++loadedWater;
         } catch (const std::exception& error) {
             ++failedWater;
-            LogDebug(std::string("WRL water texture load failed: ") + waterSheet.texturePath + " - " + error.what());
         }
     }
 
@@ -5905,12 +5800,6 @@ void TryLoadWorldWater(AppState& state, LevelPreview& preview) {
     if (failedWater > 0) {
         preview.status += ", " + std::to_string(failedWater) + " water failed";
     }
-    LogDebug(
-        "WRL water loaded: " + preview.path +
-        " sheets=" + std::to_string(preview.waterSheets.size()) +
-        " loaded=" + std::to_string(loadedWater) +
-        " missing=" + std::to_string(missingWater) +
-        " failed=" + std::to_string(failedWater));
 }
 
 void OpenLevelPreview(AppState& state, const ArchiveNode& node) {
@@ -5919,7 +5808,6 @@ void OpenLevelPreview(AppState& state, const ArchiveNode& node) {
         return;
     }
 
-    LogDebug("open level preview: " + node.path);
     StopAudioPreview(state.audioPreview);
     StopFxPreview(state.fxPreview);
     DestroyPreviewTexture(state.texturePreview);
@@ -5936,7 +5824,6 @@ void OpenLevelPreview(AppState& state, const ArchiveNode& node) {
 
     try {
         const std::vector<char> bytes = ReadEntryBytesForPreview(state, node.entryIndex);
-        LogDebug("level preview bytes read: " + node.path + " bytes=" + std::to_string(bytes.size()));
         const std::string extension = NodeExtensionLower(node);
         if (extension == ".tdf") {
             preview = DecodeTdfTerrain(bytes, node.name, node.path);
@@ -5952,34 +5839,30 @@ void OpenLevelPreview(AppState& state, const ArchiveNode& node) {
 
         state.levelPreview = std::move(preview);
         state.status = "Previewing " + node.path;
-        LogDebug(
-            "open level preview complete: " + node.path +
-            " vertices=" + std::to_string(state.levelPreview.vertices.size()) +
-            " triangles=" + std::to_string(state.levelPreview.triangles.size()) +
-            " objects=" + std::to_string(state.levelPreview.objects.size()) +
-            " water_sheets=" + std::to_string(state.levelPreview.waterSheets.size()) +
-            " skyboxes=" + std::to_string(state.levelPreview.skyboxAssetIndices.size()));
     } catch (const std::exception& error) {
-        LogDebug(std::string("open level preview failed: ") + error.what());
         preview.status = std::string("Level preview failed: ") + error.what();
         state.levelPreview = std::move(preview);
         state.status = state.levelPreview.status;
     } catch (...) {
-        LogDebug("open level preview failed: unknown exception");
         preview.status = "Level preview failed: unknown exception.";
         state.levelPreview = std::move(preview);
         state.status = state.levelPreview.status;
     }
 }
 
+#include "export/image_export.cpp"
+#include "export/glb_export.cpp"
+#include "export/fbx_export.cpp"
+#include "export/model_export.cpp"
+#include "wrl/heightmap_export.cpp"
+#include "export/export_dialogs.cpp"
+
 void HandleNodeDoubleClick(AppState& state, int nodeIndex) {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int>(state.browser.nodes.size())) {
-        LogDebug("double click ignored: invalid node index");
         return;
     }
 
     const ArchiveNode& node = state.browser.nodes[nodeIndex];
-    LogDebug("double click: " + node.path);
     if (node.directory) {
         SelectFolder(state, nodeIndex);
         OpenFxPreviewForFolder(state, nodeIndex);
@@ -6280,6 +6163,111 @@ void DrawRightPane(AppState& state) {
                 ImGui::TextDisabled("%s", size.c_str());
             }
             ImGui::EndTooltip();
+        }
+
+        if (ImGui::BeginPopupContextItem("AssetContextMenu")) {
+            state.browser.selectedItem = nodeIndex;
+            if (IsTextureNode(node)) {
+                if (ImGui::MenuItem("Export as PNG")) {
+                    OpenExportDialog(state, nodeIndex, ExportKind::TexturePng);
+                }
+                if (ImGui::MenuItem("Export as TIFF")) {
+                    OpenExportDialog(state, nodeIndex, ExportKind::TextureTiff);
+                }
+                if (ImGui::MenuItem("Export as DDS")) {
+                    OpenExportDialog(state, nodeIndex, ExportKind::TextureDds);
+                }
+            }
+            if (IsModelNode(node)) {
+                if (IsTextureNode(node)) {
+                    ImGui::Separator();
+                }
+                if (ImGui::MenuItem("Export as GLB")) {
+                    OpenExportDialog(state, nodeIndex, ExportKind::ModelGlb);
+                }
+                if (ImGui::MenuItem("Export as FBX")) {
+                    OpenExportDialog(state, nodeIndex, ExportKind::ModelFbx);
+                }
+            }
+            if (IsLevelNode(node) && NodeExtensionLower(node) == ".wrl") {
+                if (IsTextureNode(node) || IsModelNode(node)) {
+                    ImGui::Separator();
+                }
+                std::vector<std::string> heightmapTargets;
+                try {
+                    heightmapTargets = LoadWrlHeightmapTargetLabels(state, node);
+                } catch (const std::exception& error) {
+                }
+
+                auto openHeightmapPreview = [&](int terrainSectionIndex) {
+                    try {
+                        OpenWrlHeightmapPreview(state, node, terrainSectionIndex);
+                    } catch (const std::exception& error) {
+                        state.status = std::string("Heightmap failed: ") + error.what();
+                    }
+                };
+
+                if (heightmapTargets.size() > 1) {
+                    if (ImGui::BeginMenu("View Heightmap")) {
+                        if (ImGui::MenuItem("All levels")) {
+                            openHeightmapPreview(-1);
+                        }
+                        ImGui::Separator();
+                        for (std::size_t targetIndex = 0; targetIndex < heightmapTargets.size(); ++targetIndex) {
+                            const std::string itemLabel =
+                                heightmapTargets[targetIndex] + "##ViewHeightmap" + std::to_string(targetIndex);
+                            if (ImGui::MenuItem(itemLabel.c_str())) {
+                                openHeightmapPreview(static_cast<int>(targetIndex));
+                            }
+                        }
+                        ImGui::EndMenu();
+                    }
+                } else if (ImGui::MenuItem("View Heightmap")) {
+                    openHeightmapPreview(-1);
+                }
+
+                if (ImGui::BeginMenu("Export Heightmap As")) {
+                    auto drawHeightmapExportFormats = [&](int terrainSectionIndex, const std::string& targetLabel) {
+                        if (ImGui::MenuItem("PNG")) {
+                            OpenHeightmapExportDialog(
+                                state, nodeIndex, ExportKind::HeightmapPng, terrainSectionIndex, targetLabel);
+                        }
+                        if (ImGui::MenuItem("TIFF")) {
+                            OpenHeightmapExportDialog(
+                                state, nodeIndex, ExportKind::HeightmapTiff, terrainSectionIndex, targetLabel);
+                        }
+                        if (ImGui::MenuItem("DDS")) {
+                            OpenHeightmapExportDialog(
+                                state, nodeIndex, ExportKind::HeightmapDds, terrainSectionIndex, targetLabel);
+                        }
+                    };
+
+                    if (heightmapTargets.size() > 1) {
+                        if (ImGui::BeginMenu("All levels")) {
+                            drawHeightmapExportFormats(-1, {});
+                            ImGui::EndMenu();
+                        }
+                        ImGui::Separator();
+                        for (std::size_t targetIndex = 0; targetIndex < heightmapTargets.size(); ++targetIndex) {
+                            const std::string menuLabel =
+                                heightmapTargets[targetIndex] + "##ExportHeightmap" + std::to_string(targetIndex);
+                            if (ImGui::BeginMenu(menuLabel.c_str())) {
+                                drawHeightmapExportFormats(
+                                    static_cast<int>(targetIndex),
+                                    heightmapTargets[targetIndex]);
+                                ImGui::EndMenu();
+                            }
+                        }
+                    } else {
+                        drawHeightmapExportFormats(-1, {});
+                    }
+                    ImGui::EndMenu();
+                }
+            }
+            if (!IsTextureNode(node) && !IsModelNode(node) && !(IsLevelNode(node) && NodeExtensionLower(node) == ".wrl")) {
+                ImGui::TextDisabled("No export actions");
+            }
+            ImGui::EndPopup();
         }
 
         ImGui::PopID();
@@ -6583,7 +6571,6 @@ void DrawTexturePreview(AppState& state) {
         UpdateTexturePreviewAnimation(preview);
     } catch (const std::exception& error) {
         preview.status = std::string("Animation update failed: ") + error.what();
-        LogDebug(preview.status);
     }
 
     if (ImGui::SmallButton("x##CloseTexturePreview")) {
@@ -6627,7 +6614,6 @@ void DrawTexturePreview(AppState& state) {
             preview.status.clear();
         } catch (const std::exception& error) {
             preview.status = std::string("Preview update failed: ") + error.what();
-            LogDebug(preview.status);
         }
     }
 
@@ -6672,6 +6658,21 @@ void DrawTexturePreview(AppState& state) {
     ImGui::SetCursorScreenPos(imageMin);
     const ImTextureID textureId = static_cast<ImTextureID>(static_cast<std::uintptr_t>(preview.textureId));
     ImGui::Image(ImTextureRef(textureId), imageSize);
+    if (preview.generatedHeightmap && ImGui::BeginPopupContextItem("HeightmapPreviewContextMenu")) {
+        if (ImGui::BeginMenu("Export Heightmap As")) {
+            if (ImGui::MenuItem("PNG")) {
+                OpenPreviewTextureExportDialog(state, ExportKind::HeightmapPng);
+            }
+            if (ImGui::MenuItem("TIFF")) {
+                OpenPreviewTextureExportDialog(state, ExportKind::HeightmapTiff);
+            }
+            if (ImGui::MenuItem("DDS")) {
+                OpenPreviewTextureExportDialog(state, ExportKind::HeightmapDds);
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+    }
 
     ImGui::EndChild();
 }
@@ -6741,7 +6742,6 @@ void DrawFxPreview(AppState& state) {
         UpdateFxPreviewAnimation(preview);
     } catch (const std::exception& error) {
         preview.status = std::string("FX animation failed: ") + error.what();
-        LogDebug(preview.status);
     }
 
     if (ImGui::SmallButton("x##CloseFxPreview")) {
@@ -6963,7 +6963,6 @@ void DrawAudioPreview(AppState& state) {
         } catch (const std::exception& error) {
             preview.status = std::string("Audio playback failed: ") + error.what();
             state.status = preview.status;
-            LogDebug(preview.status);
         }
     }
     ImGui::SameLine();
@@ -7060,8 +7059,6 @@ void EmitSkyboxVertex(const ModelVertex& vertex) {
 }
 
 void ApplyModelTextureTiling(unsigned char) {
-    // The MD2 blend tiling byte is not a direct OpenGL wrap mask. Whirled leaves
-    // these textures repeatable; clamping smears edge texels across UVs outside 0..1.
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
@@ -7306,30 +7303,6 @@ void RenderModelOpenGl(ModelPreview& preview, ImVec2 canvasMin, ImVec2 canvasMax
         gGlUseProgram(0);
     }
 
-    if (gLastLoggedModelRenderPath != preview.path) {
-        const auto loadedTextures = std::count_if(
-            preview.materials.begin(),
-            preview.materials.end(),
-            [](const ModelMaterial& material) {
-                return material.textureId != 0;
-            });
-        const auto visibleSections = std::count_if(
-            preview.sections.begin(),
-            preview.sections.end(),
-            [](const ModelSection& section) {
-                return section.visible && section.triangleCount > 0;
-            });
-        LogDebug(
-            "render model opengl: " + preview.path +
-            " viewport=" + std::to_string(width) + "x" + std::to_string(height) +
-            " radius=" + std::to_string(preview.radius) +
-            " textures=" + std::to_string(loadedTextures) + "/" + std::to_string(preview.materials.size()) +
-            " visible_sections=" + std::to_string(visibleSections) + "/" + std::to_string(preview.sections.size()) +
-            " uv_as_authored=1 render_texture_flip_y=1" +
-            " previous_program=" + std::to_string(previousProgram));
-        gLastLoggedModelRenderPath = preview.path;
-    }
-
     glPushAttrib(
         GL_ENABLE_BIT |
         GL_COLOR_BUFFER_BIT |
@@ -7506,12 +7479,26 @@ const LevelTerrainSection* ActiveTerrainSection(const LevelPreview& preview) {
     return &preview.terrainSections[static_cast<std::size_t>(preview.selectedTerrainSection)];
 }
 
+std::uint32_t WrlSublevelLayerKey(std::uint32_t layer) {
+    return layer & 0x00000fe0U;
+}
+
+bool WrlLayersMatchSublevel(std::uint32_t terrainLayer, std::uint32_t objectLayer) {
+    if (terrainLayer == objectLayer) {
+        return true;
+    }
+
+    const std::uint32_t terrainKey = WrlSublevelLayerKey(terrainLayer);
+    const std::uint32_t objectKey = WrlSublevelLayerKey(objectLayer);
+    return terrainKey != 0 && terrainKey == objectKey;
+}
+
 bool IsLayerVisibleForActiveSublevel(const LevelPreview& preview, bool hasLayer, std::uint32_t layer) {
     const LevelTerrainSection* section = ActiveTerrainSection(preview);
     if (section == nullptr || !section->hasLayer) {
         return true;
     }
-    return hasLayer && layer == section->layer;
+    return hasLayer && WrlLayersMatchSublevel(section->layer, layer);
 }
 
 bool IsObjectInActiveSublevel(const LevelPreview& preview, const WorldObject& object) {
@@ -7656,7 +7643,6 @@ GLuint BuildWhirledTerrainFixedDisplayList(const LevelTerrainSection& section) {
     glNewList(displayList, GL_COMPILE);
     glDisable(GL_CULL_FACE);
 
-    // Match Whirled's shader blend in fixed-function OpenGL: first write depth, then add each texture layer by mix.
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
@@ -8502,24 +8488,6 @@ void RenderLevelOpenGl(LevelPreview& preview, ImVec2 canvasMin, ImVec2 canvasMax
     if (gGlUseProgram != nullptr) {
         glGetIntegerv(kGlCurrentProgram, &previousProgram);
         gGlUseProgram(0);
-    }
-
-    if (gLastLoggedLevelRenderPath != preview.path) {
-        LogDebug(
-            "render level opengl: " + preview.path +
-            " viewport=" + std::to_string(width) + "x" + std::to_string(height) +
-            " radius=" + std::to_string(preview.radius) +
-            " vertices=" + std::to_string(preview.vertices.size()) +
-            " triangles=" + std::to_string(preview.triangles.size()) +
-            " terrain_sections=" + std::to_string(preview.terrainSections.size()) +
-            " objects=" + std::to_string(preview.objects.size()) +
-            " model_instances=" + std::to_string(preview.modelInstances.size()) +
-            " water_sheets=" + std::to_string(preview.waterSheets.size()) +
-            " skyboxes=" + std::to_string(preview.skyboxAssetIndices.size()) +
-            " model_assets=" + std::to_string(preview.modelAssets.size()) +
-            " texture=" + LevelTerrainTextureSummary(preview) +
-            " previous_program=" + std::to_string(previousProgram));
-        gLastLoggedLevelRenderPath = preview.path;
     }
 
     glPushAttrib(
@@ -9545,6 +9513,28 @@ void DrawFileDialogs(AppState& state) {
         }
         ImGuiFileDialog::Instance()->Close();
     }
+
+    if (ImGuiFileDialog::Instance()->Display(
+            kExportFileDialogKey,
+            ImGuiWindowFlags_NoCollapse,
+            ImVec2(720.0f, 420.0f),
+            ImVec2(FLT_MAX, FLT_MAX))) {
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            try {
+                ExecuteExportDialogResult(
+                    state,
+                    ImGuiFileDialog::Instance()->GetFilePathName(IGFD_ResultMode_KeepInputFile));
+            } catch (const std::exception& error) {
+                state.status = std::string("Export failed: ") + error.what();
+            } catch (...) {
+                state.status = "Export failed: unknown error.";
+            }
+        }
+        state.pendingExportKind = ExportKind::None;
+        state.pendingExportNode = -1;
+        state.pendingExportPreviewTexture = false;
+        ImGuiFileDialog::Instance()->Close();
+    }
 }
 
 void DrawEmptyState(AppState& state) {
@@ -9703,10 +9693,9 @@ LRESULT WINAPI WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
-} // namespace
+}
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
-    InitializeDebugLog();
     ImGui_ImplWin32_EnableDpiAwareness();
     const float mainScale = ImGui_ImplWin32_GetDpiScaleForMonitor(
         MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
@@ -9792,7 +9781,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
         try {
             ProcessRetiredPreviewTextures();
         } catch (const std::exception& error) {
-            LogDebug(std::string("retired texture cleanup failed: ") + error.what());
         }
     }
 
