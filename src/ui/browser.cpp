@@ -208,7 +208,7 @@ void DrawRightPane(AppState& state) {
     const float tileStride = tileSize.x + ImGui::GetStyle().ItemSpacing.x;
 
     auto nodeMatchesFilter = [&](const ArchiveNode& node) {
-        if (!NodeMatchesAssetFilter(node, state.assetFilter)) {
+        if (!NodeMatchesAssetFilter(state, node, state.assetFilter)) {
             return false;
         }
 
@@ -408,7 +408,18 @@ void DrawRightPane(AppState& state) {
                     ImGui::EndMenu();
                 }
             }
-            if (!IsTextureNode(node) && !IsModelNode(node) && !(IsLevelNode(node) && NodeExtensionLower(node) == ".wrl")) {
+            if (IsAudioNode(node)) {
+                if (IsTextureNode(node) || IsModelNode(node) || (IsLevelNode(node) && NodeExtensionLower(node) == ".wrl")) {
+                    ImGui::Separator();
+                }
+                if (ImGui::MenuItem("Export as WAV")) {
+                    OpenExportDialog(state, nodeIndex, ExportKind::AudioWav);
+                }
+            }
+            if (!IsTextureNode(node) &&
+                !IsModelNode(node) &&
+                !(IsLevelNode(node) && NodeExtensionLower(node) == ".wrl") &&
+                !IsAudioNode(node)) {
                 ImGui::TextDisabled("No export actions");
             }
             ImGui::EndPopup();
@@ -531,6 +542,7 @@ void DrawAssetFilterBar(AppState& state) {
         AssetFilter::All,
         AssetFilter::Textures,
         AssetFilter::Models,
+        AssetFilter::SkinnedModels,
         AssetFilter::Levels,
         AssetFilter::Fx,
         AssetFilter::Audio,

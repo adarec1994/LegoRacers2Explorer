@@ -16,28 +16,30 @@ Browse the contents of Lego Racers 2. Included features:
 
 ## Preview
 
-Here is a preview of a Balverine in Fable 2 Asset Browser:
-![Balverine.png](images/Balverine.png)
+Here is a preview of a house in Lego Racers 2 Explorer:
+![img.png](images/ModelSample1.png)
 
-Here is a preview of an Oak Tree:
-![OakTree.png](images/OakTree.png)
+Here is a preview of a helicopter:
+![img.png](images/ModelPreview2.png)
 
-Skeleton preview is also available!
-![SkeletonPreview.png](images/SkeletonPreview.png)
+Skeleton and animations preview is also available!
+![img.png](images/AnimationPreview.png)
 
-You can mess around rotating bones; animations work too!
-![BoneRotation.png](images/BoneRotation.png)
+Quick sample of the The Berg in blender!
+![img.png](images/TheBergBlender.png)
 
-Quick sample of a Hobbe in blender!
-![HobbeBlender.png](images/HobbeBlender.png)
+Level preview:
+![img.png](images/LevelPreview.png)
+
+Here is Sandy Beach in blender:
+![img.png](images/BlenderLevelPreview.png)
 
 And here is an example of some textures:
-![TextureSample1.png](images/TextureSample1.png)
-![TextureSample2.png](images/TextureSample2.png)
+![img.png](src/TextureSample1.png)
+![img.png](images/TextureSample2.png)
 
 Audio playback controls:
-
-![AudioControls.png](images/AudioControls.png)
+![img.png](images/AudioControls.png)
 
 ## How to Contribute
 

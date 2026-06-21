@@ -61,6 +61,14 @@ void ApplyModelTextureTiling(unsigned char) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
+void ResetSolidModelState() {
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glDisable(GL_ALPHA_TEST);
+    glDepthMask(GL_TRUE);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
 GLuint BuildModelDisplayList(const ModelPreview& preview, bool skyboxUv = false) {
     if (preview.vertices.empty() || preview.triangles.empty()) {
         return 0;
@@ -72,11 +80,13 @@ GLuint BuildModelDisplayList(const ModelPreview& preview, bool skyboxUv = false)
     }
 
     glNewList(displayList, GL_COMPILE);
+    ResetSolidModelState();
     for (const ModelSection& section : preview.sections) {
         if (!section.visible || section.triangleCount == 0) {
             continue;
         }
 
+        ResetSolidModelState();
         GLuint textureId = 0;
         if (section.textureIndex < preview.materials.size()) {
             textureId = preview.materials[section.textureIndex].textureId;
@@ -85,23 +95,10 @@ GLuint BuildModelDisplayList(const ModelPreview& preview, bool skyboxUv = false)
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, textureId);
             ApplyModelTextureTiling(section.textureTiling);
-            glColor4f(1.0f, 1.0f, 1.0f, section.alpha);
-            if (section.alphaType == 0) {
-                glDisable(GL_BLEND);
+            glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+            if (section.alphaType == 0 || section.alphaType == 1 || section.alphaType == 4) {
                 glEnable(GL_ALPHA_TEST);
                 glAlphaFunc(GL_GREATER, 0.5f);
-            } else if (section.alphaType == 1) {
-                glDisable(GL_ALPHA_TEST);
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            } else if (section.alphaType == 4) {
-                glDisable(GL_ALPHA_TEST);
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-                glDisable(GL_CULL_FACE);
-            } else {
-                glDisable(GL_ALPHA_TEST);
-                glDisable(GL_BLEND);
             }
         } else {
             const auto color = ModelMaterialColorFloats(section.textureIndex);
@@ -132,9 +129,9 @@ GLuint BuildModelDisplayList(const ModelPreview& preview, bool skyboxUv = false)
             }
         }
         glEnd();
-        glDisable(GL_ALPHA_TEST);
-        glDisable(GL_BLEND);
+        ResetSolidModelState();
     }
+    ResetSolidModelState();
     glBindTexture(GL_TEXTURE_2D, 0);
     glEndList();
     return displayList;
@@ -320,9 +317,7 @@ void RenderModelOpenGl(ModelPreview& preview, ImVec2 canvasMin, ImVec2 canvasMax
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
-    glDisable(GL_CULL_FACE);
-    glDisable(GL_BLEND);
-    glDisable(GL_ALPHA_TEST);
+    ResetSolidModelState();
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glShadeModel(GL_SMOOTH);
     glEnable(GL_TEXTURE_2D);
@@ -356,11 +351,16 @@ void RenderModelOpenGl(ModelPreview& preview, ImVec2 canvasMin, ImVec2 canvasMax
             textureId = preview.materials[section.textureIndex].textureId;
         }
 
+        ResetSolidModelState();
         if (textureId != 0) {
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, textureId);
             ApplyModelTextureTiling(section.textureTiling);
             glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+            if (section.alphaType == 0 || section.alphaType == 1 || section.alphaType == 4) {
+                glEnable(GL_ALPHA_TEST);
+                glAlphaFunc(GL_GREATER, 0.5f);
+            }
         } else {
             const auto color = ModelMaterialColorFloats(section.textureIndex);
             glDisable(GL_TEXTURE_2D);
@@ -381,6 +381,7 @@ void RenderModelOpenGl(ModelPreview& preview, ImVec2 canvasMin, ImVec2 canvasMax
             EmitModelVertex(renderVertices[triangle.c], section.textureCoordinateIndex);
         }
         glEnd();
+        ResetSolidModelState();
     }
 
     RenderModelSkeletonOpenGl(preview);

@@ -199,6 +199,7 @@ std::filesystem::path ExecutableDirectory() {
 #include "preview/preview_lifecycle.cpp"
 
 #include "export/image_export.cpp"
+#include "export/audio_export.cpp"
 #include "export/glb_export.cpp"
 #include "export/fbx_export.cpp"
 #include "export/model_export.cpp"

@@ -18,6 +18,8 @@ const char* ExportDialogTitle(ExportKind kind) {
         return "Export Heightmap TIFF";
     case ExportKind::HeightmapDds:
         return "Export Heightmap DDS";
+    case ExportKind::AudioWav:
+        return "Export WAV";
     default:
         return "Export";
     }
@@ -40,6 +42,8 @@ const char* ExportDialogFilter(ExportKind kind) {
         return ".fbx";
     case ExportKind::LevelLr2:
         return ".lr2";
+    case ExportKind::AudioWav:
+        return ".wav";
     default:
         return ".*";
     }
@@ -304,6 +308,12 @@ void ExecuteExportTaskRequest(AppState& exportState,
             progress({0, 0, node.path, "Exporting heightmap"});
         }
         ExportHeightmapNode(exportState, node, request.exportPath, request.kind, request.terrainSection);
+        break;
+    case ExportKind::AudioWav:
+        if (progress) {
+            progress({0, 0, node.path, "Exporting audio"});
+        }
+        ExportAudioNode(exportState, node, request.exportPath);
         break;
     default:
         throw std::runtime_error("No export is pending.");

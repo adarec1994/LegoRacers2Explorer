@@ -58,6 +58,35 @@ bool IsFxNode(const ArchiveNode& node) {
     return IsFxPath(node.path);
 }
 
+bool BytesContainTag(const std::vector<char>& bytes, const char* tag) {
+    return std::search(bytes.begin(), bytes.end(), tag, tag + std::strlen(tag)) != bytes.end();
+}
+
+bool IsSkinnedModelNode(AppState& state, const ArchiveNode& node) {
+    if (!IsModelNode(node)) {
+        return false;
+    }
+
+    const std::string key = node.path;
+    const auto cached = state.skinnedModelFilterCache.find(key);
+    if (cached != state.skinnedModelFilterCache.end()) {
+        return cached->second;
+    }
+
+    bool skinned = ResolveModelSkeletonEntryIndex(state, node) != static_cast<std::size_t>(-1);
+    if (!skinned && node.entryIndex < state.archive.entries.size()) {
+        try {
+            const std::vector<char> bytes = ReadEntryBytesForPreview(state, node.entryIndex);
+            skinned = BytesContainTag(bytes, "SKN0");
+        } catch (...) {
+            skinned = false;
+        }
+    }
+
+    state.skinnedModelFilterCache[key] = skinned;
+    return skinned;
+}
+
 bool HasPreviewSupport(const ArchiveNode& node) {
     return IsTextureNode(node) || IsModelNode(node) || IsLevelNode(node) || IsAudioNode(node) || IsTextNode(node);
 }
@@ -72,6 +101,8 @@ const char* AssetFilterLabel(AssetFilter filter) {
         return "Textures";
     case AssetFilter::Models:
         return "Models";
+    case AssetFilter::SkinnedModels:
+        return "Skinned Models";
     case AssetFilter::Levels:
         return "Levels";
     case AssetFilter::Fx:
@@ -84,7 +115,7 @@ const char* AssetFilterLabel(AssetFilter filter) {
     }
 }
 
-bool NodeMatchesAssetFilter(const ArchiveNode& node, AssetFilter filter) {
+bool NodeMatchesAssetFilter(AppState& state, const ArchiveNode& node, AssetFilter filter) {
     if (filter == AssetFilter::All) {
         return true;
     }
@@ -98,6 +129,8 @@ bool NodeMatchesAssetFilter(const ArchiveNode& node, AssetFilter filter) {
         return extension == ".mip" || extension == ".tga";
     case AssetFilter::Models:
         return extension == ".md2";
+    case AssetFilter::SkinnedModels:
+        return IsSkinnedModelNode(state, node);
     case AssetFilter::Levels:
         return extension == ".wrl";
     case AssetFilter::Fx:
