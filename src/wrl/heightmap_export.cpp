@@ -104,7 +104,7 @@ void OpenWrlHeightmapPreview(AppState& state, const ArchiveNode& node, int terra
 
     const std::vector<char> bytes = ReadEntryBytesForPreview(state, node.entryIndex);
     LevelPreview level = DecodeWrlWorld(bytes, node.name, node.path);
-    TryLoadWorldTerrain(state, level);
+    TryLoadWorldTerrainForExport(state, level);
     DecodedTexture heightmap = BuildHeightmapTexture(level, terrainSectionIndex);
     std::string targetName;
     if (terrainSectionIndex >= 0 &&
@@ -152,7 +152,7 @@ void ExportHeightmapNode(AppState& state,
 
     const std::vector<char> bytes = ReadEntryBytesForPreview(state, node.entryIndex);
     LevelPreview level = DecodeWrlWorld(bytes, node.name, node.path);
-    TryLoadWorldTerrain(state, level);
+    TryLoadWorldTerrainForExport(state, level);
     DecodedTexture heightmap = BuildHeightmapTexture(level, terrainSectionIndex);
     ExportDecodedTextureFile(heightmap, requestedPath, kind);
     StopLevelPreview(level);

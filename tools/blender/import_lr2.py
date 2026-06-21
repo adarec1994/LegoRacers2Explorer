@@ -1,7 +1,7 @@
 bl_info = {
     "name": "LEGO Racers 2 LR2 Importer",
-    "author": "Codex",
-    "version": (1, 0, 0),
+    "author": "Matthew W",
+    "version": (1, 0, 1),
     "blender": (3, 6, 0),
     "location": "File > Import > LEGO Racers 2 (.lr2)",
     "category": "Import-Export",
@@ -55,11 +55,23 @@ def make_material(name, image_path=None, alpha=1.0, color=(0.8, 0.8, 0.8, 1.0)):
         bsdf.inputs["Alpha"].default_value = alpha
         bsdf.inputs["Base Color"].default_value = (color[0], color[1], color[2], alpha)
         if image_path and Path(image_path).exists():
-            image = bpy.data.images.load(str(image_path), check_existing=True)
-            texture = material.node_tree.nodes.new("ShaderNodeTexImage")
-            texture.image = image
+            texture = make_image_texture_node(material.node_tree.nodes, material.node_tree.links, image_path)
             material.node_tree.links.new(texture.outputs["Color"], bsdf.inputs["Base Color"])
     return material
+
+
+def make_image_texture_node(nodes, links, image_path):
+    texture = nodes.new("ShaderNodeTexImage")
+    texture.image = bpy.data.images.load(str(image_path), check_existing=True)
+    try:
+        texture.extension = "REPEAT"
+    except Exception:
+        pass
+    uv_node = new_shader_node(nodes, ("ShaderNodeUVMap",))
+    if uv_node is not None:
+        uv_node.uv_map = "LR2 UV"
+        links.new(uv_node.outputs["UV"], texture.inputs["Vector"])
+    return texture
 
 
 def new_shader_node(nodes, names):
@@ -84,7 +96,7 @@ def make_terrain_material(root, section, material_key):
     material = bpy.data.materials.new(safe_name(Path(section.get("path", "Terrain")).stem + "_" + f"{material_key:08X}", "Terrain"))
     material.diffuse_color = (0.55, 0.72, 0.28, 1.0)
     material.use_nodes = True
-    material["lr2_material_key"] = int(material_key)
+    material["lr2_material_key"] = f"{int(material_key) & 0xffffffff:08X}"
     material["lr2_blend_attribute"] = "lr2_mix"
 
     layers = {}
@@ -107,53 +119,45 @@ def make_terrain_material(root, section, material_key):
     if bsdf is None:
         return material
 
+    first_path = next((path for path in paths if path is not None), None)
+    if first_path is None:
+        return material
+
+    first_texture = make_image_texture_node(nodes, links, first_path)
+    links.new(first_texture.outputs["Color"], bsdf.inputs["Base Color"])
+
     attribute = new_shader_node(nodes, ("ShaderNodeAttribute",))
     separate = new_shader_node(nodes, ("ShaderNodeSeparateColor", "ShaderNodeSeparateRGBA", "ShaderNodeSeparateRGB"))
     if attribute is None or separate is None:
-        first_path = next((path for path in paths if path is not None), None)
-        if first_path is not None:
-            texture = nodes.new("ShaderNodeTexImage")
-            texture.image = bpy.data.images.load(str(first_path), check_existing=True)
-            links.new(texture.outputs["Color"], bsdf.inputs["Base Color"])
         return material
 
     attribute.attribute_name = "lr2_mix"
     links.new(attribute.outputs["Color"], separate.inputs[0])
     channel_names = (("Red", "R"), ("Green", "G"), ("Blue", "B"), ("Alpha", "A"))
-    current = None
+    current = first_texture.outputs["Color"]
+    first_layer = paths.index(first_path)
 
     for layer, path in enumerate(paths):
-        if path is None:
+        if path is None or layer == first_layer:
             continue
-        texture = nodes.new("ShaderNodeTexImage")
-        texture.image = bpy.data.images.load(str(path), check_existing=True)
         weight = socket_or_none(separate.outputs, channel_names[layer])
         if weight is None:
             continue
-        multiply = new_shader_node(nodes, ("ShaderNodeMixRGB",))
-        if multiply is None:
+        mix = new_shader_node(nodes, ("ShaderNodeMixRGB",))
+        if mix is None:
             continue
-        multiply.blend_type = "MULTIPLY"
-        multiply.inputs["Fac"].default_value = 1.0
-        links.new(texture.outputs["Color"], multiply.inputs["Color1"])
-        links.new(weight, multiply.inputs["Color2"])
-        if current is None:
-            current = multiply.outputs["Color"]
-        else:
-            add = new_shader_node(nodes, ("ShaderNodeMixRGB",))
-            if add is None:
-                continue
-            add.blend_type = "ADD"
-            add.inputs["Fac"].default_value = 1.0
-            links.new(current, add.inputs["Color1"])
-            links.new(multiply.outputs["Color"], add.inputs["Color2"])
-            current = add.outputs["Color"]
+        texture = make_image_texture_node(nodes, links, path)
+        mix.blend_type = "MIX"
+        links.new(weight, mix.inputs["Fac"])
+        links.new(current, mix.inputs["Color1"])
+        links.new(texture.outputs["Color"], mix.inputs["Color2"])
+        current = mix.outputs["Color"]
 
-    if current is not None:
+    if current != first_texture.outputs["Color"]:
+        for link in list(bsdf.inputs["Base Color"].links):
+            links.remove(link)
         links.new(current, bsdf.inputs["Base Color"])
-
     return material
-
 
 def import_glb_asset(path, name):
     asset_collection = bpy.data.collections.new(safe_name(name, "Asset"))

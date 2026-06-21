@@ -70,15 +70,9 @@ void DrawFileDialogs(AppState& state) {
             ImVec2(720.0f, 420.0f),
             ImVec2(FLT_MAX, FLT_MAX))) {
         if (ImGuiFileDialog::Instance()->IsOk()) {
-            try {
-                ExecuteExportDialogResult(
-                    state,
-                    ImGuiFileDialog::Instance()->GetFilePathName(IGFD_ResultMode_KeepInputFile));
-            } catch (const std::exception& error) {
-                state.status = std::string("Export failed: ") + error.what();
-            } catch (...) {
-                state.status = "Export failed: unknown error.";
-            }
+            StartExportTask(
+                state,
+                ImGuiFileDialog::Instance()->GetFilePathName(IGFD_ResultMode_KeepInputFile));
         }
         state.pendingExportKind = ExportKind::None;
         state.pendingExportNode = -1;
@@ -106,38 +100,32 @@ void DrawEmptyState(AppState& state) {
 }
 
 void DrawToolbar(AppState& state) {
-    ImGui::Text("%s  LEGO Racers 2 GTC Browser", ICON_FA_BOX_ARCHIVE);
-    const bool dumpActive = IsDumpActive(state);
-    const float browseWidth = 118.0f;
-    const float dumpWidth = 122.0f;
-    const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - browseWidth - dumpWidth - spacing);
+    ImGuiIO& io = ImGui::GetIO();
+    state.fontSize = std::clamp(state.fontSize, 12.0f, 28.0f);
+    io.FontGlobalScale = state.fontSize / 16.0f;
 
-    if (dumpActive) {
-        ImGui::BeginDisabled();
-    }
-    if (ImGui::Button((std::string(ICON_FA_FOLDER_OPEN) + "  Browse").c_str(), ImVec2(browseWidth, 0.0f))) {
-        OpenGtcDialog();
-    }
-    if (dumpActive) {
-        ImGui::EndDisabled();
+    if (!ImGui::BeginMenuBar()) {
+        return;
     }
 
-    ImGui::SameLine();
-    if (!state.archiveLoaded || dumpActive) {
-        ImGui::BeginDisabled();
+    if (ImGui::BeginMenu("Settings")) {
+        ImGui::SetNextItemWidth(180.0f);
+        ImGui::SliderFloat("Font Size", &state.fontSize, 12.0f, 28.0f, "%.0f px");
+        state.fontSize = std::clamp(state.fontSize, 12.0f, 28.0f);
+        io.FontGlobalScale = state.fontSize / 16.0f;
+        ImGui::EndMenu();
     }
-    if (ImGui::Button((std::string(ICON_FA_DOWNLOAD) + "  Dump All").c_str(), ImVec2(dumpWidth, 0.0f))) {
-        OpenDumpDirectoryDialog(state);
+
+    if (ImGui::MenuItem("About")) {
+        state.aboutOpen = true;
     }
-    if (!state.archiveLoaded || dumpActive) {
-        ImGui::EndDisabled();
-    }
-    ImGui::Separator();
+
+    ImGui::EndMenuBar();
 }
 
 void DrawMainUi(AppState& state) {
     PollDumpTask(state);
+    PollExportTask(state);
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -149,11 +137,14 @@ void DrawMainUi(AppState& state) {
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoScrollbar |
-        ImGuiWindowFlags_NoScrollWithMouse;
+        ImGuiWindowFlags_NoScrollWithMouse |
+        ImGuiWindowFlags_MenuBar;
 
     ImGui::Begin("GTC Browser", nullptr, windowFlags);
 
+    DrawToolbar(state);
     DrawExplorer(state);
+    DrawAboutWindow(state);
     DrawFileDialogs(state);
 
     ImGui::End();

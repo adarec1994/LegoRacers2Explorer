@@ -26,6 +26,16 @@ std::string Lr2SafeStem(std::string value) {
     return value.empty() ? std::string("asset") : value;
 }
 
+void ReportExportProgress(const ExportProgressCallback& progress,
+                          std::size_t stepsDone,
+                          std::size_t totalSteps,
+                          const std::string& currentPath,
+                          const std::string& message) {
+    if (progress) {
+        progress({stepsDone, totalSteps, currentPath, message});
+    }
+}
+
 struct LevelPreviewGuard {
     LevelPreview* level = nullptr;
 
@@ -261,7 +271,10 @@ void WriteLr2WaterSheet(std::ostream& out,
     out << "}}";
 }
 
-void ExportLevelNode(AppState& state, const ArchiveNode& node, const std::filesystem::path& requestedPath) {
+void ExportLevelNode(AppState& state,
+                     const ArchiveNode& node,
+                     const std::filesystem::path& requestedPath,
+                     const ExportProgressCallback& progress = {}) {
     if (!IsLevelNode(node) || NodeExtensionLower(node) != ".wrl") {
         throw std::runtime_error("Selected file is not a WRL saved world.");
     }
@@ -273,30 +286,43 @@ void ExportLevelNode(AppState& state, const ArchiveNode& node, const std::filesy
     const std::filesystem::path modelDirectory = assetDirectory / "models";
     const std::filesystem::path textureDirectory = assetDirectory / "textures";
 
+    ReportExportProgress(progress, 0, 0, node.path, "Reading WRL");
     const std::vector<char> bytes = ReadEntryBytesForPreview(state, node.entryIndex);
     LevelPreview level = DecodeWrlWorld(bytes, node.name, node.path);
     LevelPreviewGuard levelGuard{&level};
-    TryLoadWorldTerrain(state, level);
-    TryLoadWorldModels(state, level);
-    TryLoadWorldWater(state, level);
+    ReportExportProgress(progress, 0, 0, node.path, "Loading terrain");
+    TryLoadWorldTerrainForExport(state, level, progress);
+    ReportExportProgress(progress, 0, 0, node.path, "Loading models");
+    TryLoadWorldModelsForExport(state, level, progress);
+
+    const std::size_t totalSteps =
+        4U +
+        level.modelAssets.size() +
+        level.terrainSections.size() +
+        level.waterSheets.size();
+    std::size_t step = 1;
 
     std::filesystem::create_directories(modelDirectory);
     std::vector<std::string> modelPaths(level.modelAssets.size());
     for (std::size_t assetIndex = 0; assetIndex < level.modelAssets.size(); ++assetIndex) {
         const LevelModelAsset& asset = level.modelAssets[assetIndex];
         if (!asset.loaded || asset.model.vertices.empty()) {
+            ++step;
             continue;
         }
         const std::string stem = Lr2SafeStem(std::filesystem::path(asset.path).stem().string());
         const std::filesystem::path modelPath =
             modelDirectory / (stem + "_" + std::to_string(assetIndex) + ".glb");
+        ReportExportProgress(progress, step, totalSteps, asset.path, "Exporting model GLB");
         ExportModelGlb(asset.model, modelPath);
         modelPaths[assetIndex] = Lr2RelativePath(lr2Directory, modelPath);
+        ++step;
     }
 
     std::unordered_map<std::string, std::string> exportedTextures;
     int textureCounter = 0;
 
+    ReportExportProgress(progress, step, totalSteps, lr2Path.string(), "Writing LR2 JSON");
     std::ofstream out(lr2Path, std::ios::binary | std::ios::trunc);
     if (!out) {
         throw std::runtime_error("Could not open LR2 export file: " + lr2Path.string());
@@ -363,6 +389,12 @@ void ExportLevelNode(AppState& state, const ArchiveNode& node, const std::filesy
         if (sectionIndex != 0) {
             out << ",";
         }
+        ReportExportProgress(
+            progress,
+            step,
+            totalSteps,
+            level.terrainSections[sectionIndex].path,
+            "Writing terrain");
         WriteLr2TerrainSection(
             out,
             state,
@@ -372,12 +404,19 @@ void ExportLevelNode(AppState& state, const ArchiveNode& node, const std::filesy
             textureDirectory,
             exportedTextures,
             textureCounter);
+        ++step;
     }
     out << "],\"water\":[";
     for (std::size_t waterIndex = 0; waterIndex < level.waterSheets.size(); ++waterIndex) {
         if (waterIndex != 0) {
             out << ",";
         }
+        ReportExportProgress(
+            progress,
+            step,
+            totalSteps,
+            level.waterSheets[waterIndex].texturePath,
+            "Writing water");
         WriteLr2WaterSheet(
             out,
             state,
@@ -387,8 +426,10 @@ void ExportLevelNode(AppState& state, const ArchiveNode& node, const std::filesy
             textureDirectory,
             exportedTextures,
             textureCounter);
+        ++step;
     }
     out << "],\"objects\":[";
+    ReportExportProgress(progress, step, totalSteps, node.path, "Writing objects");
     for (std::size_t objectIndex = 0; objectIndex < level.objects.size(); ++objectIndex) {
         if (objectIndex != 0) {
             out << ",";
@@ -399,4 +440,5 @@ void ExportLevelNode(AppState& state, const ArchiveNode& node, const std::filesy
     if (!out) {
         throw std::runtime_error("Could not write LR2 export file: " + lr2Path.string());
     }
+    ReportExportProgress(progress, totalSteps, totalSteps, lr2Path.string(), "Export complete");
 }

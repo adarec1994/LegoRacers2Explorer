@@ -27,6 +27,25 @@ struct DumpSnapshot {
     std::string message;
 };
 
+struct ExportProgress {
+    std::size_t stepsDone = 0;
+    std::size_t totalSteps = 0;
+    std::string currentPath;
+    std::string message;
+};
+
+using ExportProgressCallback = std::function<void(const ExportProgress&)>;
+
+struct ExportSnapshot {
+    bool active = false;
+    bool finished = false;
+    bool succeeded = false;
+    std::size_t stepsDone = 0;
+    std::size_t totalSteps = 0;
+    std::string currentPath;
+    std::string message;
+};
+
 struct DecodedTexture {
     int width = 0;
     int height = 0;
@@ -440,6 +459,15 @@ struct AppState {
     std::string dumpCurrentPath;
     std::string dumpMessage;
     std::future<void> dumpFuture;
+    std::mutex exportMutex;
+    bool exportActive = false;
+    bool exportFinished = false;
+    bool exportSucceeded = false;
+    std::size_t exportStepsDone = 0;
+    std::size_t exportTotalSteps = 0;
+    std::string exportCurrentPath;
+    std::string exportMessage;
+    std::future<void> exportFuture;
     std::array<char, 256> searchText = {};
     AssetFilter assetFilter = AssetFilter::All;
     ExportKind pendingExportKind = ExportKind::None;
@@ -447,6 +475,12 @@ struct AppState {
     int pendingExportTerrainSection = -1;
     bool pendingExportPreviewTexture = false;
     float bottomPanelHeight = 260.0f;
+    float fontSize = 16.0f;
+    bool aboutOpen = false;
+    bool aboutImageLoadAttempted = false;
+    GLuint aboutTextureId = 0;
+    int aboutImageWidth = 0;
+    int aboutImageHeight = 0;
     TexturePreview texturePreview;
     TextPreview textPreview;
     FxPreview fxPreview;

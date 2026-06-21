@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include <wincodec.h>
+#include <shellapi.h>
 #include <GL/gl.h>
 
 #include "generated_paths.h"
@@ -34,6 +35,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <iomanip>
 #include <limits>
@@ -198,6 +200,7 @@ std::filesystem::path ExecutableDirectory() {
 #include "export/glb_export.cpp"
 #include "export/fbx_export.cpp"
 #include "export/model_export.cpp"
+#include "wrl/export_loaders.cpp"
 #include "wrl/heightmap_export.cpp"
 #include "wrl/level_export.cpp"
 #include "export/export_dialogs.cpp"
@@ -212,6 +215,7 @@ std::filesystem::path ExecutableDirectory() {
 
 #include "ui/model_level_panels.cpp"
 
+#include "ui/about_window.cpp"
 #include "ui/main_window.cpp"
 
 LRESULT WINAPI WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -340,6 +344,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
     StopLevelPreview(state.levelPreview);
     DestroyFxPreviewTextureImmediate(state.fxPreview);
     DestroyAllPreviewTextures(state.texturePreview);
+    DeleteGlTexture(state.aboutTextureId);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

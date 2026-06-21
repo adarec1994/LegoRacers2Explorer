@@ -189,42 +189,199 @@ void OpenPreviewTextureExportDialog(AppState& state, ExportKind kind) {
         config);
 }
 
-void ExecuteExportDialogResult(AppState& state, const std::filesystem::path& exportPath) {
-    if (state.pendingExportPreviewTexture) {
+struct ExportTaskRequest {
+    gtc::ArchiveInfo archive;
+    ArchiveBrowser browser;
+    ArchiveNode node;
+    ExportKind kind = ExportKind::None;
+    int terrainSection = -1;
+    bool previewTexture = false;
+    DecodedTexture previewTextureData;
+    std::string previewTextureName;
+    std::filesystem::path exportPath;
+};
+
+void SetExportProgress(AppState& state, const ExportProgress& progress) {
+    std::lock_guard lock(state.exportMutex);
+    state.exportStepsDone = progress.stepsDone;
+    state.exportTotalSteps = progress.totalSteps;
+    state.exportCurrentPath = progress.currentPath;
+    state.exportMessage = progress.message.empty() ? "Exporting" : progress.message;
+}
+
+ExportSnapshot GetExportSnapshot(AppState& state) {
+    std::lock_guard lock(state.exportMutex);
+    return {
+        state.exportActive,
+        state.exportFinished,
+        state.exportSucceeded,
+        state.exportStepsDone,
+        state.exportTotalSteps,
+        state.exportCurrentPath,
+        state.exportMessage,
+    };
+}
+
+bool IsExportActive(AppState& state) {
+    std::lock_guard lock(state.exportMutex);
+    return state.exportActive;
+}
+
+void PollExportTask(AppState& state) {
+    if (state.exportFuture.valid() &&
+        state.exportFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        state.exportFuture.get();
+
+        std::lock_guard lock(state.exportMutex);
+        state.exportActive = false;
+        state.status = state.exportMessage;
+    }
+}
+
+ExportTaskRequest BuildExportTaskRequest(AppState& state, const std::filesystem::path& exportPath) {
+    ExportTaskRequest request;
+    request.archive = state.archive;
+    request.browser = state.browser;
+    request.kind = state.pendingExportKind;
+    request.terrainSection = state.pendingExportTerrainSection;
+    request.previewTexture = state.pendingExportPreviewTexture;
+    request.exportPath = exportPath;
+
+    if (request.previewTexture) {
         if (!state.texturePreview.open || !state.texturePreview.generatedHeightmap) {
             throw std::runtime_error("Heightmap preview is no longer open.");
         }
-        ExportDecodedTextureFile(state.texturePreview.decoded, exportPath, state.pendingExportKind);
-        state.status = "Exported heightmap preview to " + exportPath.string();
-        return;
+        request.previewTextureData = state.texturePreview.decoded;
+        request.previewTextureName = state.texturePreview.name;
+        return request;
     }
 
     if (state.pendingExportNode < 0 || state.pendingExportNode >= static_cast<int>(state.browser.nodes.size())) {
         throw std::runtime_error("Export selection is no longer valid.");
     }
+    request.node = state.browser.nodes[state.pendingExportNode];
+    return request;
+}
 
-    const ArchiveNode& node = state.browser.nodes[state.pendingExportNode];
-    switch (state.pendingExportKind) {
+void ExecuteExportTaskRequest(AppState& exportState,
+                              const ExportTaskRequest& request,
+                              const ExportProgressCallback& progress) {
+    if (request.previewTexture) {
+        if (progress) {
+            progress({0, 0, request.previewTextureName, "Exporting image"});
+        }
+        ExportDecodedTextureFile(request.previewTextureData, request.exportPath, request.kind);
+        if (progress) {
+            progress({1, 1, request.exportPath.string(), "Export complete"});
+        }
+        return;
+    }
+
+    const ArchiveNode& node = request.node;
+    switch (request.kind) {
     case ExportKind::TexturePng:
     case ExportKind::TextureTiff:
     case ExportKind::TextureDds:
-        ExportTextureNode(state, node, exportPath, state.pendingExportKind);
+        if (progress) {
+            progress({0, 0, node.path, "Exporting texture"});
+        }
+        ExportTextureNode(exportState, node, request.exportPath, request.kind);
         break;
     case ExportKind::ModelGlb:
     case ExportKind::ModelFbx:
-        ExportModelNode(state, node, exportPath, state.pendingExportKind);
+        if (progress) {
+            progress({0, 0, node.path, "Exporting model"});
+        }
+        ExportModelNode(exportState, node, request.exportPath, request.kind);
         break;
     case ExportKind::LevelLr2:
-        ExportLevelNode(state, node, exportPath);
+        ExportLevelNode(exportState, node, request.exportPath, progress);
         break;
     case ExportKind::HeightmapPng:
     case ExportKind::HeightmapTiff:
     case ExportKind::HeightmapDds:
-        ExportHeightmapNode(state, node, exportPath, state.pendingExportKind, state.pendingExportTerrainSection);
+        if (progress) {
+            progress({0, 0, node.path, "Exporting heightmap"});
+        }
+        ExportHeightmapNode(exportState, node, request.exportPath, request.kind, request.terrainSection);
         break;
     default:
         throw std::runtime_error("No export is pending.");
     }
 
-    state.status = "Exported " + node.path + " to " + exportPath.string();
+    if (progress) {
+        progress({1, 1, request.exportPath.string(), "Export complete"});
+    }
+}
+
+std::string ExportSuccessMessage(const ExportTaskRequest& request) {
+    if (request.previewTexture) {
+        return "Exported heightmap preview to " + request.exportPath.string();
+    }
+    return "Exported " + request.node.path + " to " + request.exportPath.string();
+}
+
+void StartExportTask(AppState& state, const std::filesystem::path& exportPath) {
+    if (IsDumpActive(state)) {
+        state.status = "Wait for dump to finish before exporting.";
+        return;
+    }
+
+    ExportTaskRequest request;
+    try {
+        request = BuildExportTaskRequest(state, exportPath);
+    } catch (const std::exception& error) {
+        state.status = std::string("Export failed: ") + error.what();
+        return;
+    }
+
+    {
+        std::lock_guard lock(state.exportMutex);
+        if (state.exportActive) {
+            state.status = "Wait for the current export to finish.";
+            return;
+        }
+
+        state.exportActive = true;
+        state.exportFinished = false;
+        state.exportSucceeded = false;
+        state.exportStepsDone = 0;
+        state.exportTotalSteps = 0;
+        state.exportCurrentPath = request.previewTexture ? request.previewTextureName : request.node.path;
+        state.exportMessage = "Starting export";
+    }
+
+    state.exportFuture = std::async(std::launch::async, [&state, request = std::move(request)]() {
+        try {
+            AppState exportState;
+            exportState.archive = request.archive;
+            exportState.browser = request.browser;
+            exportState.archiveLoaded = true;
+            exportState.archiveDataLoaded = false;
+
+            const ExportProgressCallback progress = [&state](const ExportProgress& value) {
+                SetExportProgress(state, value);
+            };
+            progress({0, 0, request.previewTexture ? request.previewTextureName : request.node.path, "Preparing export"});
+            ExecuteExportTaskRequest(exportState, request, progress);
+
+            std::lock_guard lock(state.exportMutex);
+            state.exportFinished = true;
+            state.exportSucceeded = true;
+            state.exportStepsDone = state.exportTotalSteps == 0 ? 1 : state.exportTotalSteps;
+            state.exportTotalSteps = state.exportTotalSteps == 0 ? 1 : state.exportTotalSteps;
+            state.exportCurrentPath = request.exportPath.string();
+            state.exportMessage = ExportSuccessMessage(request);
+        } catch (const std::exception& error) {
+            std::lock_guard lock(state.exportMutex);
+            state.exportFinished = true;
+            state.exportSucceeded = false;
+            state.exportMessage = std::string("Export failed: ") + error.what();
+        } catch (...) {
+            std::lock_guard lock(state.exportMutex);
+            state.exportFinished = true;
+            state.exportSucceeded = false;
+            state.exportMessage = "Export failed: unknown error.";
+        }
+    });
 }

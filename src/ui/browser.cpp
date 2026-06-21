@@ -471,22 +471,42 @@ void DrawRightPane(AppState& state) {
 
 void DrawStatusSummary(AppState& state) {
     const DumpSnapshot dump = GetDumpSnapshot(state);
-    if (!dump.active) {
+    if (dump.active) {
+        const float fraction = dump.totalFiles == 0
+                                   ? 0.0f
+                                   : static_cast<float>(dump.filesWritten) /
+                                         static_cast<float>(dump.totalFiles);
+        const std::string label =
+            std::to_string(dump.filesWritten) + " / " + std::to_string(dump.totalFiles);
+        ImGui::ProgressBar(fraction, ImVec2(280.0f, 0.0f), label.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", dump.message.c_str());
+
+        if (!dump.currentPath.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", dump.currentPath.c_str());
+        }
         return;
     }
 
-    const float fraction = dump.totalFiles == 0
-                               ? 0.0f
-                               : static_cast<float>(dump.filesWritten) /
-                                     static_cast<float>(dump.totalFiles);
-    const std::string label =
-        std::to_string(dump.filesWritten) + " / " + std::to_string(dump.totalFiles);
-    ImGui::ProgressBar(fraction, ImVec2(280.0f, 0.0f), label.c_str());
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", dump.message.c_str());
+    const ExportSnapshot exportSnapshot = GetExportSnapshot(state);
+    if (!exportSnapshot.active) {
+        return;
+    }
 
-    if (!dump.currentPath.empty() && ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", dump.currentPath.c_str());
+    const float fraction = exportSnapshot.totalSteps == 0
+                               ? static_cast<float>(std::fmod(ImGui::GetTime() * 0.35, 1.0))
+                               : static_cast<float>(exportSnapshot.stepsDone) /
+                                     static_cast<float>(exportSnapshot.totalSteps);
+    const std::string label = exportSnapshot.totalSteps == 0
+                                  ? std::string("Exporting")
+                                  : std::to_string(exportSnapshot.stepsDone) + " / " +
+                                        std::to_string(exportSnapshot.totalSteps);
+    ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f), ImVec2(280.0f, 0.0f), label.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", exportSnapshot.message.c_str());
+
+    if (!exportSnapshot.currentPath.empty() && ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", exportSnapshot.currentPath.c_str());
     }
 }
 
@@ -540,6 +560,8 @@ void DrawBottomPanel(AppState& state) {
     leftWidth = std::min(leftWidth, std::max(120.0f, fullWidth - 320.0f));
 
     const bool dumpActive = IsDumpActive(state);
+    const bool exportActive = IsExportActive(state);
+    const bool busy = dumpActive || exportActive;
     const float actionButtonSize = ImGui::GetFrameHeight();
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
 
@@ -550,7 +572,7 @@ void DrawBottomPanel(AppState& state) {
         ImGui::GetWindowContentRegionMax().x - (actionButtonSize * 2.0f) - spacing;
     ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), buttonStart));
 
-    if (dumpActive) {
+    if (busy) {
         ImGui::BeginDisabled();
     }
     if (ImGui::Button(ICON_FA_FOLDER_OPEN, ImVec2(actionButtonSize, 0.0f))) {
@@ -559,12 +581,12 @@ void DrawBottomPanel(AppState& state) {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Browse for GAMEDATA.GTC");
     }
-    if (dumpActive) {
+    if (busy) {
         ImGui::EndDisabled();
     }
 
     ImGui::SameLine();
-    if (!state.archiveLoaded || dumpActive) {
+    if (!state.archiveLoaded || busy) {
         ImGui::BeginDisabled();
     }
     if (ImGui::Button(ICON_FA_DOWNLOAD, ImVec2(actionButtonSize, 0.0f))) {
@@ -573,11 +595,11 @@ void DrawBottomPanel(AppState& state) {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Dump all files");
     }
-    if (!state.archiveLoaded || dumpActive) {
+    if (!state.archiveLoaded || busy) {
         ImGui::EndDisabled();
     }
 
-    const float statusHeight = dumpActive ? ImGui::GetFrameHeightWithSpacing() : 0.0f;
+    const float statusHeight = busy ? ImGui::GetFrameHeightWithSpacing() : 0.0f;
     const float bodyHeight = std::max(60.0f, ImGui::GetContentRegionAvail().y - statusHeight);
     if (ImGui::BeginChild("ContentBrowserBody", ImVec2(0.0f, bodyHeight), ImGuiChildFlags_None)) {
         ImGui::BeginChild("ArchiveTree", ImVec2(leftWidth, 0.0f), ImGuiChildFlags_Borders);
@@ -597,7 +619,7 @@ void DrawBottomPanel(AppState& state) {
     }
     ImGui::EndChild();
 
-    if (dumpActive) {
+    if (busy) {
         DrawStatusSummary(state);
     }
     ImGui::EndChild();

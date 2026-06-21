@@ -84,6 +84,7 @@ else()
 endif()
 
 set(FONT_AWESOME_SOLID_TTF "${fontawesome_SOURCE_DIR}/webfonts/fa-solid-900.ttf")
+set(PROJECT_SOURCE_DIR_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 configure_file(src/generated_paths.h.in
         ${CMAKE_CURRENT_BINARY_DIR}/generated_paths.h
         @ONLY)

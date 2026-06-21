@@ -1,3 +1,33 @@
+void LoadModelTexturesForExport(AppState& state, ModelPreview& preview) {
+    int loaded = 0;
+    int missing = 0;
+    for (ModelMaterial& material : preview.materials) {
+        const std::size_t textureEntryIndex = ResolveModelTextureEntryIndex(state, material.path);
+        if (textureEntryIndex == static_cast<std::size_t>(-1)) {
+            ++missing;
+            continue;
+        }
+
+        try {
+            material.texture = DecodeArchiveTextureEntryForPreview(state, textureEntryIndex);
+            FlipTextureVertically(material.texture);
+            material.loaded = material.texture.width > 0 &&
+                              material.texture.height > 0 &&
+                              !material.texture.rgba.empty();
+            if (material.loaded) {
+                ++loaded;
+            }
+        } catch (const std::exception& error) {
+            ++missing;
+        }
+    }
+
+    if (!preview.materials.empty()) {
+        preview.status += "  textures " + std::to_string(loaded) + "/" +
+                          std::to_string(preview.materials.size()) + " loaded";
+    }
+}
+
 ModelPreview LoadModelForExport(AppState& state, const ArchiveNode& node) {
     if (!IsModelNode(node)) {
         throw std::runtime_error("Selected file is not a model.");
@@ -7,7 +37,7 @@ ModelPreview LoadModelForExport(AppState& state, const ArchiveNode& node) {
     model.name = node.name;
     model.path = node.path;
     LoadModelPreviewSkeleton(state, model, node);
-    LoadModelPreviewTextures(state, model);
+    LoadModelTexturesForExport(state, model);
     return model;
 }
 
