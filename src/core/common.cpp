@@ -225,9 +225,9 @@ std::string PreferredInitialDirectory() {
 
 std::filesystem::path SettingsFilePath() {
     if (const char* appData = std::getenv("APPDATA"); appData != nullptr && appData[0] != '\0') {
-        return std::filesystem::path(appData) / "LegoRacers2GtcBrowser" / "settings.txt";
+        return std::filesystem::path(appData) / "Lego Racers 2 Explorer" / "settings.txt";
     }
-    return std::filesystem::current_path() / "LegoRacers2GtcBrowser.settings.txt";
+    return std::filesystem::current_path() / "Lego Racers 2 Explorer.settings.txt";
 }
 
 std::string SettingsFilePathString() {

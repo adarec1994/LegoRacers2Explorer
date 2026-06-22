@@ -53,7 +53,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 
 namespace {
 
-constexpr wchar_t kWindowClassName[] = L"LegoRacers2GtcBrowserWindow";
+constexpr wchar_t kWindowClassName[] = L"Lego Racers 2 Explorer Window";
 constexpr char kChooseGtcDialogKey[] = "ChooseGtcDialog";
 constexpr char kChooseDumpDirectoryDialogKey[] = "ChooseDumpDirectoryDialog";
 constexpr char kExportFileDialogKey[] = "ExportFileDialog";
@@ -270,7 +270,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
 
     HWND hwnd = CreateWindowW(
         kWindowClassName,
-        L"LEGO Racers 2 GTC Browser",
+        L"Lego Racers 2 Explorer",
         WS_OVERLAPPEDWINDOW,
         100,
         100,

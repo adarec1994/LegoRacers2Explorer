@@ -188,7 +188,7 @@ std::string BuildGlbJson(const ModelPreview& model,
                          const std::vector<std::string>& animationJson) {
     std::ostringstream json;
     json << "{";
-    json << "\"asset\":{\"version\":\"2.0\",\"generator\":\"LEGO Racers 2 Browser\"},";
+    json << "\"asset\":{\"version\":\"2.0\",\"generator\":\"Lego Racers 2 Explorer\"},";
     json << "\"scene\":0,";
     json << "\"scenes\":[{\"nodes\":[0";
     for (std::size_t boneIndex = 0; boneIndex < model.skeleton.size(); ++boneIndex) {

@@ -160,7 +160,7 @@ void DrawMainUi(AppState& state) {
         ImGuiWindowFlags_NoScrollWithMouse |
         ImGuiWindowFlags_MenuBar;
 
-    ImGui::Begin("GTC Browser", nullptr, windowFlags);
+    ImGui::Begin("Lego Racers 2 Explorer", nullptr, windowFlags);
 
     DrawToolbar(state);
     DrawExplorer(state);

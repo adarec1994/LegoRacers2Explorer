@@ -1,4 +1,4 @@
-# Lego Racers 2 Exporter
+# Lego Racers 2 Explorer
 Browse the contents of Lego Racers 2. Included features:
 - Search and filter the internal files
 - Render and preview the models, textures & animations.
@@ -61,4 +61,6 @@ Follow these steps to submit your changes:
 4. Push the changes to your fork.
 5. Submit a pull request to the 'main' branch.
 
-    
+
+### TO-DO:
+1. Fix the texturing. Works fine in blender, weird in the viewer.

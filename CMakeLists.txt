@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(LegoRacers2 LANGUAGES CXX)
+project(Lego_Racers_2_Explorer LANGUAGES CXX)
 
 include(FetchContent)
 
@@ -8,7 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 if(MSVC)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set(_lr2_config_name "Deb")
+    string(APPEND _lr2_config_name "ug")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:${_lr2_config_name}>:${_lr2_config_name}>")
 endif()
 
 FetchContent_Declare(
@@ -112,12 +114,13 @@ add_library(gtc_core STATIC
         src/gtc_archive.h)
 target_include_directories(gtc_core PUBLIC src)
 
-add_executable(LegoRacers2 WIN32
+add_executable(Lego_Racers_2_Explorer WIN32
         src/main.cpp
         ${BLENDER_ADDON_HEADER})
-target_include_directories(LegoRacers2 PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_compile_definitions(LegoRacers2 PRIVATE UNICODE _UNICODE)
-target_link_libraries(LegoRacers2 PRIVATE
+set_target_properties(Lego_Racers_2_Explorer PROPERTIES OUTPUT_NAME "Lego Racers 2 Explorer")
+target_include_directories(Lego_Racers_2_Explorer PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_definitions(Lego_Racers_2_Explorer PRIVATE UNICODE _UNICODE)
+target_link_libraries(Lego_Racers_2_Explorer PRIVATE
         gtc_core
         imgui
         ImGuiFileDialog

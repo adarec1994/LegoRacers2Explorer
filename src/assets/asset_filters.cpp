@@ -58,33 +58,36 @@ bool IsFxNode(const ArchiveNode& node) {
     return IsFxPath(node.path);
 }
 
-bool BytesContainTag(const std::vector<char>& bytes, const char* tag) {
-    return std::search(bytes.begin(), bytes.end(), tag, tag + std::strlen(tag)) != bytes.end();
-}
-
-bool IsSkinnedModelNode(AppState& state, const ArchiveNode& node) {
+bool IsSkinnedModelNode(const ArchiveNode& node) {
     if (!IsModelNode(node)) {
         return false;
     }
 
-    const std::string key = node.path;
-    const auto cached = state.skinnedModelFilterCache.find(key);
-    if (cached != state.skinnedModelFilterCache.end()) {
-        return cached->second;
-    }
-
-    bool skinned = ResolveModelSkeletonEntryIndex(state, node) != static_cast<std::size_t>(-1);
-    if (!skinned && node.entryIndex < state.archive.entries.size()) {
-        try {
-            const std::vector<char> bytes = ReadEntryBytesForPreview(state, node.entryIndex);
-            skinned = BytesContainTag(bytes, "SKN0");
-        } catch (...) {
-            skinned = false;
-        }
-    }
-
-    state.skinnedModelFilterCache[key] = skinned;
-    return skinned;
+    static constexpr std::array<const char*, 21> paths = {{
+        "game data\\aliens\\alien bodies\\models\\alien body.md2",
+        "game data\\animation\\albatros\\albatros.md2",
+        "game data\\animation\\beige_beast\\beige.md2",
+        "game data\\animation\\bluemech\\bluemech.md2",
+        "game data\\animation\\frog_walker\\frog_walker.md2",
+        "game data\\animation\\hopper\\hopper.md2",
+        "game data\\animation\\polar_bear\\polar_bear.md2",
+        "game data\\animation\\ptera\\ptera.md2",
+        "game data\\animation\\red_mech\\redmech.md2",
+        "game data\\animation\\shieldgenerator\\shieldgenerator.md2",
+        "game data\\animation\\stegosaurus\\steg1.md2",
+        "game data\\animation\\tentacle\\tentacle.md2",
+        "game data\\animation\\theberg\\anm\\theberg.md2",
+        "game data\\animation\\theberg\\theberg.md2",
+        "game data\\animation\\t-rex\\t-rex.md2",
+        "game data\\animation\\triceratops\\triceratops.md2",
+        "game data\\animation\\trophy\\trophy.md2",
+        "game data\\animation\\tyreman\\tyreman.md2",
+        "game data\\animation\\working_crane\\working_crane.md2",
+        "game data\\characters\\bodies\\models\\minifig body.md2",
+        "game data\\ramas\\rama bodies\\models\\rama body.md2",
+    }};
+    const std::string normalized = NormalizeArchivePath(node.path);
+    return std::find(paths.begin(), paths.end(), normalized) != paths.end();
 }
 
 bool HasPreviewSupport(const ArchiveNode& node) {
@@ -130,7 +133,7 @@ bool NodeMatchesAssetFilter(AppState& state, const ArchiveNode& node, AssetFilte
     case AssetFilter::Models:
         return extension == ".md2";
     case AssetFilter::SkinnedModels:
-        return IsSkinnedModelNode(state, node);
+        return IsSkinnedModelNode(node);
     case AssetFilter::Levels:
         return extension == ".wrl";
     case AssetFilter::Fx:

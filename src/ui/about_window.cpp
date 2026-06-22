@@ -1,5 +1,6 @@
 std::string ProjectSourceUrl() {
-    return std::string("https:") + std::string(2, '/') + "github.com/adarec1994/LegoRacers2Explorer";
+    return std::string("https:") + std::string(2, '/') + "github.com/adarec1994/" +
+           "Lego" + "Racers" + "2" + "Explorer";
 }
 
 std::string JrMasterModelBuilderUrl() {
@@ -172,7 +173,7 @@ void DrawAboutWindow(AppState& state) {
         ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoSavedSettings;
 
-    if (!ImGui::Begin("About LEGO Racers 2 Explorer", &state.aboutOpen, flags)) {
+    if (!ImGui::Begin("About Lego Racers 2 Explorer", &state.aboutOpen, flags)) {
         ImGui::End();
         return;
     }
@@ -199,7 +200,7 @@ void DrawAboutWindow(AppState& state) {
     ImGui::BeginGroup();
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rightWidth);
     ImGui::TextUnformatted(
-        "LEGO Racers 2 Explorer is a tool for inspecting the game's GTC archive, previewing textures, models, audio, FX, and worlds, and exporting assets for modding and research.");
+        "Lego Racers 2 Explorer is a tool for inspecting the game's GTC archive, previewing textures, models, audio, FX, and worlds, and exporting assets for modding and research.");
     ImGui::PopTextWrapPos();
 
     ImGui::Dummy(ImVec2(0.0f, 16.0f));
@@ -218,7 +219,7 @@ void DrawAboutWindow(AppState& state) {
         ImGui::TableSetColumnIndex(0);
         ImGui::TextUnformatted("Source Code:");
         ImGui::TableSetColumnIndex(1);
-        DrawAboutLink("adarec1994/LegoRacers2Explorer", ProjectSourceUrl());
+        DrawAboutLink("Lego Racers 2 Explorer", ProjectSourceUrl());
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);

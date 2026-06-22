@@ -160,7 +160,6 @@ void LoadArchive(AppState& state, const std::filesystem::path& path) {
         state.archiveLoaded = true;
         state.archiveDataLoaded = false;
         state.archiveData.clear();
-        state.skinnedModelFilterCache.clear();
         StopAudioPreview(state.audioPreview);
         StopFxPreview(state.fxPreview);
         DestroyPreviewTexture(state.texturePreview);
@@ -177,7 +176,6 @@ void LoadArchive(AppState& state, const std::filesystem::path& path) {
         state.archiveLoaded = false;
         state.archiveDataLoaded = false;
         state.archiveData.clear();
-        state.skinnedModelFilterCache.clear();
         state.browser = {};
         StopAudioPreview(state.audioPreview);
         StopFxPreview(state.fxPreview);

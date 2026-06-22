@@ -470,7 +470,6 @@ struct AppState {
     std::string exportCurrentPath;
     std::string exportMessage;
     std::future<void> exportFuture;
-    std::unordered_map<std::string, bool> skinnedModelFilterCache;
     std::array<char, 256> searchText = {};
     AssetFilter assetFilter = AssetFilter::All;
     ExportKind pendingExportKind = ExportKind::None;

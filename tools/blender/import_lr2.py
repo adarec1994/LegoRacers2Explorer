@@ -1,9 +1,9 @@
 bl_info = {
-    "name": "LEGO Racers 2 LR2 Importer",
+    "name": "Lego Racers 2 Explorer LR2 Importer",
     "author": "Matthew W",
     "version": (1, 0, 1),
     "blender": (3, 6, 0),
-    "location": "File > Import > LEGO Racers 2 (.lr2)",
+    "location": "File > Import > Lego Racers 2 Explorer (.lr2)",
     "category": "Import-Export",
 }
 
@@ -304,7 +304,7 @@ def import_lr2(context, filepath):
 
 class IMPORT_SCENE_OT_lr2(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.lr2"
-    bl_label = "Import LEGO Racers 2 LR2"
+    bl_label = "Import Lego Racers 2 Explorer LR2"
     bl_options = {"REGISTER", "UNDO"}
 
     filename_ext = ".lr2"
@@ -315,7 +315,7 @@ class IMPORT_SCENE_OT_lr2(bpy.types.Operator, ImportHelper):
 
 
 def menu_func_import(self, context):
-    self.layout.operator(IMPORT_SCENE_OT_lr2.bl_idname, text="LEGO Racers 2 (.lr2)")
+    self.layout.operator(IMPORT_SCENE_OT_lr2.bl_idname, text="Lego Racers 2 Explorer (.lr2)")
 
 
 def register():
