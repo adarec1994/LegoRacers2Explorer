@@ -499,26 +499,6 @@ void DrawStatusSummary(AppState& state) {
         return;
     }
 
-    const ExportSnapshot exportSnapshot = GetExportSnapshot(state);
-    if (!exportSnapshot.active) {
-        return;
-    }
-
-    const float fraction = exportSnapshot.totalSteps == 0
-                               ? static_cast<float>(std::fmod(ImGui::GetTime() * 0.35, 1.0))
-                               : static_cast<float>(exportSnapshot.stepsDone) /
-                                     static_cast<float>(exportSnapshot.totalSteps);
-    const std::string label = exportSnapshot.totalSteps == 0
-                                  ? std::string("Exporting")
-                                  : std::to_string(exportSnapshot.stepsDone) + " / " +
-                                        std::to_string(exportSnapshot.totalSteps);
-    ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f), ImVec2(280.0f, 0.0f), label.c_str());
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", exportSnapshot.message.c_str());
-
-    if (!exportSnapshot.currentPath.empty() && ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", exportSnapshot.currentPath.c_str());
-    }
 }
 
 void DrawAssetFilterButton(AppState& state, AssetFilter filter) {
@@ -611,7 +591,7 @@ void DrawBottomPanel(AppState& state) {
         ImGui::EndDisabled();
     }
 
-    const float statusHeight = busy ? ImGui::GetFrameHeightWithSpacing() : 0.0f;
+    const float statusHeight = dumpActive ? ImGui::GetFrameHeightWithSpacing() : 0.0f;
     const float bodyHeight = std::max(60.0f, ImGui::GetContentRegionAvail().y - statusHeight);
     if (ImGui::BeginChild("ContentBrowserBody", ImVec2(0.0f, bodyHeight), ImGuiChildFlags_None)) {
         ImGui::BeginChild("ArchiveTree", ImVec2(leftWidth, 0.0f), ImGuiChildFlags_Borders);
@@ -631,7 +611,7 @@ void DrawBottomPanel(AppState& state) {
     }
     ImGui::EndChild();
 
-    if (busy) {
+    if (dumpActive) {
         DrawStatusSummary(state);
     }
     ImGui::EndChild();

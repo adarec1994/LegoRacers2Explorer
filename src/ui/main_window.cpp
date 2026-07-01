@@ -94,6 +94,61 @@ void DrawFileDialogs(AppState& state) {
     }
 }
 
+void DrawExportProgressModal(AppState& state) {
+    const ExportSnapshot exportSnapshot = GetExportSnapshot(state);
+    constexpr const char* popupName = "Export Progress";
+
+    if (!exportSnapshot.active) {
+        return;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 viewportMin = viewport->Pos;
+    const ImVec2 viewportMax = ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y);
+    ImDrawList* background = ImGui::GetBackgroundDrawList();
+    background->AddRectFilled(viewportMin, viewportMax, IM_COL32(8, 10, 12, 154));
+
+    ImGui::OpenPopup(popupName);
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + viewport->Size.y * 0.5f),
+        ImGuiCond_Always,
+        ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Always);
+
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.02f, 0.025f, 0.030f, 0.62f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22.0f, 18.0f));
+
+    constexpr ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoCollapse;
+    if (ImGui::BeginPopupModal(popupName, nullptr, flags)) {
+        const float fraction = exportSnapshot.totalSteps == 0
+                                   ? static_cast<float>(std::fmod(ImGui::GetTime() * 0.35, 1.0))
+                                   : static_cast<float>(exportSnapshot.stepsDone) /
+                                         static_cast<float>(exportSnapshot.totalSteps);
+        const std::string label = exportSnapshot.totalSteps == 0
+                                      ? std::string("Exporting")
+                                      : std::to_string(exportSnapshot.stepsDone) + " / " +
+                                            std::to_string(exportSnapshot.totalSteps);
+
+        ImGui::TextUnformatted("Exporting");
+        ImGui::Spacing();
+        ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f), ImVec2(-FLT_MIN, 0.0f), label.c_str());
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", exportSnapshot.message.empty() ? "Preparing export" : exportSnapshot.message.c_str());
+        if (!exportSnapshot.currentPath.empty()) {
+            ImGui::TextDisabled("%s", exportSnapshot.currentPath.c_str());
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+}
+
 void DrawEmptyState(AppState& state) {
     const ImVec2 available = ImGui::GetContentRegionAvail();
     constexpr ImVec2 buttonSize(240.0f, 46.0f);
@@ -166,6 +221,7 @@ void DrawMainUi(AppState& state) {
     DrawExplorer(state);
     DrawAboutWindow(state);
     DrawFileDialogs(state);
+    DrawExportProgressModal(state);
 
     ImGui::End();
 }

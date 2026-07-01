@@ -306,6 +306,7 @@ struct WrlTerrainLink {
     std::string path;
     std::uint32_t layer = 0;
     Vec3 position;
+    Quat rotation;
     Vec3 scale = {1.0f, 1.0f, 1.0f};
     float textureScaleX = 1.0f;
     float textureScaleY = 1.0f;
@@ -316,6 +317,7 @@ struct LevelTerrainSection {
     std::string path;
     std::uint32_t layer = 0;
     Vec3 position;
+    Quat rotation;
     Vec3 scale = {1.0f, 1.0f, 1.0f};
     float textureScaleX = 1.0f;
     float textureScaleY = 1.0f;

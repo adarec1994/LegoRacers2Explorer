@@ -36,17 +36,44 @@ struct PendingModelRender {
 
 PendingModelRender gPendingModelRender;
 
-void EmitModelTexCoord(const ModelVertex& vertex, unsigned char coordinateIndex) {
+bool ModelTextureRepeatsS(unsigned char tiling) {
+    return (tiling & 0x1U) != 0;
+}
+
+bool ModelTextureRepeatsT(unsigned char tiling) {
+    return (tiling & 0x2U) != 0;
+}
+
+float NormalizeRepeatedTexCoord(float value) {
+    if (!std::isfinite(value)) {
+        return 0.0f;
+    }
+    value = std::fmod(value, 1.0f);
+    if (value < 0.0f) {
+        value += 1.0f;
+    }
+    return value;
+}
+
+void EmitModelTexCoord(const ModelVertex& vertex, unsigned char coordinateIndex, unsigned char tiling) {
     unsigned char uvSet = coordinateIndex;
     if (uvSet >= vertex.uvSetCount || uvSet >= vertex.uSets.size()) {
         uvSet = 0;
     }
-    glTexCoord2f(vertex.uSets[uvSet], vertex.vSets[uvSet]);
+    float u = vertex.uSets[uvSet];
+    float v = vertex.vSets[uvSet];
+    if (ModelTextureRepeatsS(tiling)) {
+        u = NormalizeRepeatedTexCoord(u);
+    }
+    if (ModelTextureRepeatsT(tiling)) {
+        v = NormalizeRepeatedTexCoord(v);
+    }
+    glTexCoord2f(u, v);
 }
 
-void EmitModelVertex(const ModelVertex& vertex, unsigned char coordinateIndex = 0) {
+void EmitModelVertex(const ModelVertex& vertex, unsigned char coordinateIndex = 0, unsigned char tiling = 3) {
     glNormal3f(vertex.normal.x, vertex.normal.y, vertex.normal.z);
-    EmitModelTexCoord(vertex, coordinateIndex);
+    EmitModelTexCoord(vertex, coordinateIndex, tiling);
     glVertex3f(vertex.position.x, vertex.position.y, vertex.position.z);
 }
 
@@ -56,9 +83,9 @@ void EmitSkyboxVertex(const ModelVertex& vertex) {
     glVertex3f(vertex.position.x, vertex.position.y, vertex.position.z);
 }
 
-void ApplyModelTextureTiling(unsigned char) {
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+void ApplyModelTextureTiling(unsigned char tiling) {
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ModelTextureRepeatsS(tiling) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, ModelTextureRepeatsT(tiling) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 }
 
 void ResetSolidModelState() {
@@ -123,9 +150,9 @@ GLuint BuildModelDisplayList(const ModelPreview& preview, bool skyboxUv = false)
                 EmitSkyboxVertex(preview.vertices[triangle.b]);
                 EmitSkyboxVertex(preview.vertices[triangle.c]);
             } else {
-                EmitModelVertex(preview.vertices[triangle.a], section.textureCoordinateIndex);
-                EmitModelVertex(preview.vertices[triangle.b], section.textureCoordinateIndex);
-                EmitModelVertex(preview.vertices[triangle.c], section.textureCoordinateIndex);
+                EmitModelVertex(preview.vertices[triangle.a], section.textureCoordinateIndex, section.textureTiling);
+                EmitModelVertex(preview.vertices[triangle.b], section.textureCoordinateIndex, section.textureTiling);
+                EmitModelVertex(preview.vertices[triangle.c], section.textureCoordinateIndex, section.textureTiling);
             }
         }
         glEnd();
@@ -376,9 +403,9 @@ void RenderModelOpenGl(ModelPreview& preview, ImVec2 canvasMin, ImVec2 canvasMax
                 triangle.c >= renderVertices.size()) {
                 continue;
             }
-            EmitModelVertex(renderVertices[triangle.a], section.textureCoordinateIndex);
-            EmitModelVertex(renderVertices[triangle.b], section.textureCoordinateIndex);
-            EmitModelVertex(renderVertices[triangle.c], section.textureCoordinateIndex);
+            EmitModelVertex(renderVertices[triangle.a], section.textureCoordinateIndex, section.textureTiling);
+            EmitModelVertex(renderVertices[triangle.b], section.textureCoordinateIndex, section.textureTiling);
+            EmitModelVertex(renderVertices[triangle.c], section.textureCoordinateIndex, section.textureTiling);
         }
         glEnd();
         ResetSolidModelState();

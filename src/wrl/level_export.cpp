@@ -160,6 +160,8 @@ void WriteLr2TerrainSection(std::ostream& out,
     out << "\"hasLayer\":" << (section.hasLayer ? "true" : "false") << ",";
     out << "\"position\":";
     WriteJsonVec3(out, section.position);
+    out << ",\"rotation\":";
+    WriteJsonQuat(out, section.rotation);
     out << ",\"scale\":";
     WriteJsonVec3(out, section.scale);
     out << ",\"textureScale\":[" << section.textureScaleX << "," << section.textureScaleY << "],";

@@ -53,6 +53,8 @@ void RecomputeLevelBounds(LevelPreview& preview) {
 LevelPreview DecodeTdfTerrain(const std::vector<char>& bytes, std::string name, std::string path) {
     constexpr int kGridLine = 32;
     constexpr int kGridCount = kGridLine * kGridLine;
+    constexpr int kChunkWidth = 16;
+    constexpr int kVertexChunk = kChunkWidth + 1;
     constexpr std::size_t kHeaderSize = 0x20;
     constexpr std::size_t kHeightPointSize = 8;
     constexpr std::size_t kTerrainGridInfoSize = 0x120;
@@ -142,16 +144,16 @@ LevelPreview DecodeTdfTerrain(const std::vector<char>& bytes, std::string name, 
 
     const std::size_t estimatedVertices =
         static_cast<std::size_t>(kGridCount) *
-        static_cast<std::size_t>(stepX + 1) *
-        static_cast<std::size_t>(stepY + 1);
+        static_cast<std::size_t>(kVertexChunk) *
+        static_cast<std::size_t>(kVertexChunk);
     preview.vertices.reserve(estimatedVertices);
-    preview.triangles.reserve(static_cast<std::size_t>(kGridCount) * stepX * stepY * 2U);
+    preview.triangles.reserve(static_cast<std::size_t>(kGridCount) * kChunkWidth * kChunkWidth * 2U);
 
     int skippedTriangles = 0;
-    const float terrainCenterX = static_cast<float>(stepX * kGridLine) * 0.5f;
-    const float terrainCenterZ = static_cast<float>(stepY * kGridLine) * 0.5f;
-    const float uDenominator = static_cast<float>(std::max(1, stepX));
-    const float vDenominator = static_cast<float>(std::max(1, stepY));
+    const float terrainCenterX = static_cast<float>(kChunkWidth * kGridLine) * 0.5f;
+    const float terrainCenterZ = static_cast<float>(kChunkWidth * kGridLine) * 0.5f;
+    const float uDenominator = static_cast<float>(kChunkWidth);
+    const float vDenominator = static_cast<float>(kChunkWidth);
     for (int chunkIndex = 0; chunkIndex < kGridCount; ++chunkIndex) {
             const std::uint32_t gridRelativeOffset =
                 ReadU32Le(bytes, gridOffsetTableOffset + static_cast<std::size_t>(chunkIndex) * sizeof(std::uint32_t));
@@ -169,27 +171,25 @@ LevelPreview DecodeTdfTerrain(const std::vector<char>& bytes, std::string name, 
 
             const std::size_t mapOffset = gridOffset + kGridMapInfoOffset;
             const std::uint32_t pointByteOffset = ReadU32Le(bytes, mapOffset + 0);
-            const int numX = static_cast<int>(ReadS16Le(bytes, mapOffset + 4));
-            const int numY = static_cast<int>(ReadS16Le(bytes, mapOffset + 6));
-            if (numX < 2 || numY < 2 || numX > 128 || numY > 128 || pointByteOffset % kHeightPointSize != 0) {
+            if (pointByteOffset % kHeightPointSize != 0) {
                 continue;
             }
 
             const std::size_t pointBaseOffset = pointOffsets[0] + static_cast<std::size_t>(pointByteOffset);
             const std::size_t pointBytes =
-                static_cast<std::size_t>(numX) *
-                static_cast<std::size_t>(numY) *
+                static_cast<std::size_t>(kVertexChunk) *
+                static_cast<std::size_t>(kVertexChunk) *
                 kHeightPointSize;
             if (pointBaseOffset > bytes.size() || pointBytes > bytes.size() - pointBaseOffset) {
                 continue;
             }
 
             const std::uint32_t baseVertex = static_cast<std::uint32_t>(preview.vertices.size());
-            for (int y = 0; y < numY; ++y) {
-                for (int x = 0; x < numX; ++x) {
+            for (int y = 0; y < kVertexChunk; ++y) {
+                for (int x = 0; x < kVertexChunk; ++x) {
                     const std::size_t pointOffset =
                         pointBaseOffset +
-                        (static_cast<std::size_t>(y) * static_cast<std::size_t>(numX) + static_cast<std::size_t>(x)) *
+                        (static_cast<std::size_t>(y) * static_cast<std::size_t>(kVertexChunk) + static_cast<std::size_t>(x)) *
                             kHeightPointSize;
 
                     const std::uint16_t rawHeight = ReadU16Le(bytes, pointOffset + 0);
@@ -227,11 +227,11 @@ LevelPreview DecodeTdfTerrain(const std::vector<char>& bytes, std::string name, 
                 }
             }
 
-            for (int y = 0; y + 1 < numY; ++y) {
-                for (int x = 0; x + 1 < numX; ++x) {
-                    const std::uint32_t a = baseVertex + static_cast<std::uint32_t>(y * numX + x);
+            for (int y = 0; y < kChunkWidth; ++y) {
+                for (int x = 0; x < kChunkWidth; ++x) {
+                    const std::uint32_t a = baseVertex + static_cast<std::uint32_t>(y * kVertexChunk + x);
                     const std::uint32_t b = a + 1;
-                    const std::uint32_t c = baseVertex + static_cast<std::uint32_t>((y + 1) * numX + x);
+                    const std::uint32_t c = baseVertex + static_cast<std::uint32_t>((y + 1) * kVertexChunk + x);
                     const std::uint32_t d = c + 1;
                     if (!preview.vertices[d].visible) {
                         skippedTriangles += 2;
@@ -475,6 +475,23 @@ float ReadWrlFloatOrDefault(const std::vector<char>& bytes,
     return value;
 }
 
+bool NearlyEqual(float lhs, float rhs, float epsilon = 0.0001f) {
+    return std::abs(lhs - rhs) <= epsilon;
+}
+
+bool NearlyEqual(Vec3 lhs, Vec3 rhs, float epsilon = 0.0001f) {
+    return NearlyEqual(lhs.x, rhs.x, epsilon) &&
+           NearlyEqual(lhs.y, rhs.y, epsilon) &&
+           NearlyEqual(lhs.z, rhs.z, epsilon);
+}
+
+bool NearlyEqual(Quat lhs, Quat rhs, float epsilon = 0.0001f) {
+    return NearlyEqual(lhs.x, rhs.x, epsilon) &&
+           NearlyEqual(lhs.y, rhs.y, epsilon) &&
+           NearlyEqual(lhs.z, rhs.z, epsilon) &&
+           NearlyEqual(lhs.w, rhs.w, epsilon);
+}
+
 void AddUniqueTerrainLink(std::vector<WrlTerrainLink>& links, WrlTerrainLink link) {
     link.path = NormalizeWorldAssetPath(std::move(link.path));
     if (!IsWorldAssetPath(link.path)) {
@@ -485,7 +502,12 @@ void AddUniqueTerrainLink(std::vector<WrlTerrainLink>& links, WrlTerrainLink lin
     const auto found = std::find_if(links.begin(), links.end(), [&](const WrlTerrainLink& existing) {
         return ToLower(existing.path) == wantedPath &&
                existing.hasLayer == link.hasLayer &&
-               (!existing.hasLayer || existing.layer == link.layer);
+               (!existing.hasLayer || existing.layer == link.layer) &&
+               NearlyEqual(existing.position, link.position) &&
+               NearlyEqual(existing.rotation, link.rotation) &&
+               NearlyEqual(existing.scale, link.scale) &&
+               NearlyEqual(existing.textureScaleX, link.textureScaleX) &&
+               NearlyEqual(existing.textureScaleY, link.textureScaleY);
     });
     if (found == links.end()) {
         links.push_back(std::move(link));
@@ -789,6 +811,7 @@ LevelPreview DecodeWrlWorld(const std::vector<char>& bytes, std::string name, st
             terrainLink.layer = object.layer;
             terrainLink.hasLayer = object.hasLayer;
             terrainLink.position = object.hasPosition ? object.position : Vec3{};
+            terrainLink.rotation = object.hasRotation ? object.rotation : Quat{};
             if (TryReadWorldVec3(bytes, record.offset, record.end, 0x104, terrainLink.scale)) {
                 terrainLink.scale.x = std::abs(terrainLink.scale.x) < 0.0001f ? 1.0f : terrainLink.scale.x;
                 terrainLink.scale.y = std::abs(terrainLink.scale.y) < 0.0001f ? 1.0f : terrainLink.scale.y;
@@ -886,22 +909,26 @@ void AddTerrainSectionToWorld(LevelPreview& world, LevelPreview terrain, const W
     section.layer = link.layer;
     section.hasLayer = link.hasLayer;
     section.position = link.position;
+    section.rotation = link.rotation;
     section.scale = link.scale;
     section.textureScaleX = link.textureScaleX;
     section.textureScaleY = link.textureScaleY;
     section.vertices = std::move(terrain.vertices);
     section.triangles = std::move(terrain.triangles);
     for (LevelVertex& vertex : section.vertices) {
-        vertex.position = {
-            section.position.x + vertex.position.x * section.scale.x,
-            section.position.y + vertex.position.y * section.scale.y,
-            section.position.z + vertex.position.z * section.scale.z,
+        Vec3 scaledPosition = {
+            vertex.position.x * section.scale.x,
+            vertex.position.y * section.scale.y,
+            vertex.position.z * section.scale.z,
         };
-        vertex.normal = Normalize(Vec3{
+        vertex.position = Add(section.position, Rotate(section.rotation, scaledPosition));
+
+        Vec3 scaledNormal = {
             vertex.normal.x / section.scale.x,
             vertex.normal.y / section.scale.y,
             vertex.normal.z / section.scale.z,
-        });
+        };
+        vertex.normal = Normalize(Rotate(section.rotation, scaledNormal));
         if (Length(vertex.normal) <= 0.0001f) {
             vertex.normal = {0.0f, 1.0f, 0.0f};
         }
